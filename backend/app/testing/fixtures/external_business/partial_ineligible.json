@@ -1,0 +1,84 @@
+{
+  "scenario_id": "partial_ineligible",
+  "external_organization_id": "org-fake-silver-001",
+  "link_eligibility": {
+    "external_member_id": "M002",
+    "eligible": true,
+    "reason_code": null,
+    "checked_at": "2025-06-02T09:00:00Z"
+  },
+  "recommended_jobs": [
+    {
+      "external_job_id": "JOB-002",
+      "title": "図書館整理スタッフ",
+      "summary": "図書の整理・貸出補助",
+      "work_location_summary": "区立図書館",
+      "work_schedule_summary": "週2日・10時〜14時",
+      "application_deadline": "2025-09-15T23:59:59Z",
+      "status": "published",
+      "version": "v2",
+      "updated_at": "2025-05-25T14:00:00Z"
+    }
+  ],
+  "job_detail": {
+    "external_job_id": "JOB-002",
+    "title": "図書館整理スタッフ",
+    "description": "図書の整理、返却処理、利用者への貸出補助を行います。",
+    "work_location": "東京都内（架空区）",
+    "work_schedule_text": "週2日、10時〜14時（休憩なし）",
+    "application_deadline": "2025-09-15T23:59:59Z",
+    "required_conditions": ["60歳以上", "図書整理経験歓迎"],
+    "status": "published",
+    "version": "v2",
+    "updated_at": "2025-05-25T14:00:00Z",
+    "staff_notes": null
+  },
+  "candidate_members": [
+    {
+      "external_member_id": "M002",
+      "display_label": null,
+      "eligible": true,
+      "reason_codes": [],
+      "match_rank": 1
+    },
+    {
+      "external_member_id": "M003",
+      "display_label": null,
+      "eligible": false,
+      "reason_codes": ["member_inactive"],
+      "match_rank": null
+    },
+    {
+      "external_member_id": "M004",
+      "display_label": null,
+      "eligible": false,
+      "reason_codes": ["member_notification_blocked"],
+      "match_rank": null
+    }
+  ],
+  "validation_result": {
+    "external_job_id": "JOB-002",
+    "job_eligible": true,
+    "current_job_version": "v2",
+    "job_reason_code": null,
+    "members": [
+      {
+        "external_member_id": "M002",
+        "eligible": true,
+        "reason_code": null
+      },
+      {
+        "external_member_id": "M003",
+        "eligible": false,
+        "reason_code": "member_inactive"
+      },
+      {
+        "external_member_id": "M004",
+        "eligible": false,
+        "reason_code": "member_notification_blocked"
+      }
+    ],
+    "validated_at": "2025-06-02T11:00:00Z",
+    "external_request_id": "fake-req-partial-001"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "scenario_id": "version_changed",
+  "external_organization_id": "org-fake-silver-001",
+  "link_eligibility": {
+    "external_member_id": "M006",
+    "eligible": true,
+    "reason_code": null,
+    "checked_at": "2025-06-04T09:00:00Z"
+  },
+  "recommended_jobs": [
+    {
+      "external_job_id": "JOB-004",
+      "title": "コミュニティセンター受付",
+      "summary": "施設利用受付・案内",
+      "work_location_summary": "コミュニティセンター",
+      "work_schedule_summary": "週4日・9時〜17時",
+      "application_deadline": "2025-10-31T23:59:59Z",
+      "status": "published",
+      "version": "v5",
+      "updated_at": "2025-06-01T12:00:00Z"
+    }
+  ],
+  "job_detail": {
+    "external_job_id": "JOB-004",
+    "title": "コミュニティセンター受付",
+    "description": "施設利用者の受付・案内業務を行います。",
+    "work_location": "東京都内（架空区）コミュニティセンター",
+    "work_schedule_text": "週4日、9時〜17時（休憩1時間）",
+    "application_deadline": "2025-10-31T23:59:59Z",
+    "required_conditions": ["60歳以上", "接客経験歓迎"],
+    "status": "published",
+    "version": "v5",
+    "updated_at": "2025-06-01T12:00:00Z",
+    "staff_notes": null
+  },
+  "candidate_members": [
+    {
+      "external_member_id": "M006",
+      "display_label": null,
+      "eligible": true,
+      "reason_codes": [],
+      "match_rank": 1
+    }
+  ],
+  "validation_result": {
+    "external_job_id": "JOB-004",
+    "job_eligible": false,
+    "current_job_version": "v5",
+    "job_reason_code": "job_version_changed",
+    "expected_job_version_in_request": "v3",
+    "members": [
+      {
+        "external_member_id": "M006",
+        "eligible": false,
+        "reason_code": "job_version_changed"
+      }
+    ],
+    "validated_at": "2025-06-04T11:00:00Z",
+    "external_request_id": "fake-req-version-001"
+  }
+}

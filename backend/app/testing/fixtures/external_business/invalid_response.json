@@ -1,0 +1,8 @@
+{
+  "scenario_id": "invalid_response",
+  "external_organization_id": "org-fake-silver-001",
+  "error": {
+    "type": "ExternalSystemUnavailableError",
+    "message": "external API returned malformed response: cannot parse into domain model"
+  }
+}

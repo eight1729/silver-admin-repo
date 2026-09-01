@@ -1,0 +1,8 @@
+{
+  "scenario_id": "rate_limit",
+  "external_organization_id": "org-fake-silver-001",
+  "error": {
+    "type": "ExternalSystemUnavailableError",
+    "message": "rate limit exceeded: 429 Too Many Requests (mapped to ExternalSystemUnavailableError)"
+  }
+}

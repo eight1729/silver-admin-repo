@@ -1,0 +1,161 @@
+{
+  "scenario_id": "normal",
+  "external_organization_id": "org-fake-silver-001",
+  "link_eligibility": {
+    "external_member_id": "M001",
+    "eligible": true,
+    "reason_code": null,
+    "checked_at": "2025-06-01T09:00:00Z"
+  },
+  "recommended_jobs": [
+    {
+      "external_job_id": "JOB-001",
+      "title": "事務補助スタッフ",
+      "summary": "区役所の窓口業務補助",
+      "work_location_summary": "区役所 1F",
+      "work_schedule_summary": "週3日・9時〜15時",
+      "work_days": "週3日（平日）",
+      "work_time": "9:00〜15:00",
+      "application_deadline": "2025-08-31T23:59:59Z",
+      "status": "published",
+      "version": "v1",
+      "updated_at": "2025-05-20T10:00:00Z"
+    },
+    {
+      "external_job_id": "JOB-002",
+      "title": "屋内軽作業",
+      "summary": "屋内での仕分け、袋詰めなどの軽作業",
+      "work_location_summary": "区内作業施設",
+      "work_schedule_summary": "週2〜3日（平日）・9時〜15時",
+      "work_days": "週2〜3日（平日）",
+      "work_time": "9:00〜15:00",
+      "application_deadline": "2025-09-30T23:59:59Z",
+      "status": "published",
+      "version": "v1",
+      "updated_at": "2025-05-21T10:00:00Z"
+    },
+    {
+      "external_job_id": "JOB-003",
+      "title": "施設受付補助",
+      "summary": "公共施設での受付、案内、簡単な事務補助",
+      "work_location_summary": "区内公共施設",
+      "work_schedule_summary": "週2日（火・金）・9時〜13時",
+      "work_days": "週2日（火・金）",
+      "work_time": "9:00〜13:00",
+      "application_deadline": "2025-09-30T23:59:59Z",
+      "status": "published",
+      "version": "v1",
+      "updated_at": "2025-05-22T10:00:00Z"
+    }
+  ],
+  "job_detail": {
+    "external_job_id": "JOB-001",
+    "title": "事務補助スタッフ",
+    "description": "区役所の窓口業務を補助していただきます。",
+    "work_location": "東京都内（架空区）",
+    "work_schedule_text": "週3日、9時〜15時（休憩1時間）",
+    "application_deadline": "2025-08-31T23:59:59Z",
+    "required_conditions": ["60歳以上", "基本的なPC操作"],
+    "status": "published",
+    "version": "v1",
+    "updated_at": "2025-05-20T10:00:00Z",
+    "staff_notes": null,
+    "job_url": "https://demo.local/fixtures/jobs/JOB-001"
+  },
+  "candidate_members": [
+    {
+      "external_member_id": "M001",
+      "display_label": "架空 一郎",
+      "eligible": true,
+      "reason_codes": [],
+      "match_rank": 1,
+      "line_subject": "fake-line-alpha",
+      "preference_summary": "清掃・屋外作業希望"
+    },
+    {
+      "external_member_id": "M002",
+      "display_label": "架空 花子",
+      "eligible": true,
+      "reason_codes": [],
+      "match_rank": 2,
+      "line_subject": "fake-line-kilo",
+      "preference_summary": "午前中・週2〜3日"
+    },
+    {
+      "external_member_id": "M003",
+      "display_label": "架空 次郎",
+      "eligible": true,
+      "reason_codes": [],
+      "match_rank": 3,
+      "line_subject": "fake-line-river",
+      "preference_summary": "屋外作業・短時間可"
+    },
+    {
+      "external_member_id": "M004",
+      "display_label": "架空 正雄",
+      "eligible": true,
+      "reason_codes": [],
+      "match_rank": 4,
+      "line_subject": "fake-line-zulu",
+      "preference_summary": "体を動かす仕事希望"
+    },
+    {
+      "external_member_id": "M005",
+      "display_label": "架空 和男",
+      "eligible": true,
+      "reason_codes": [],
+      "match_rank": 5,
+      "line_subject": null,
+      "preference_summary": "週2日・午前希望"
+    },
+    {
+      "external_member_id": "M006",
+      "display_label": "架空 久美",
+      "eligible": false,
+      "reason_codes": ["member_notification_blocked"],
+      "match_rank": 6,
+      "line_subject": null,
+      "preference_summary": "屋内軽作業・短時間希望"
+    }
+  ],
+  "validation_result": {
+    "external_job_id": "JOB-001",
+    "job_eligible": true,
+    "current_job_version": "v1",
+    "job_reason_code": null,
+    "members": [
+      {
+        "external_member_id": "M001",
+        "eligible": true,
+        "reason_code": null
+      },
+      {
+        "external_member_id": "M002",
+        "eligible": true,
+        "reason_code": null
+      },
+      {
+        "external_member_id": "M003",
+        "eligible": true,
+        "reason_code": null
+      },
+      {
+        "external_member_id": "M004",
+        "eligible": true,
+        "reason_code": null
+      },
+      {
+        "external_member_id": "M005",
+        "eligible": true,
+        "reason_code": null
+      },
+      {
+        "external_member_id": "M006",
+        "eligible": false,
+        "reason_code": "member_notification_blocked"
+      }
+    ],
+    "validated_at": "2025-06-01T10:30:00Z",
+    "external_request_id": "fake-req-normal-001"
+  }
+}

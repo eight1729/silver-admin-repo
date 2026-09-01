@@ -1,0 +1,1 @@
+{ "extends": "../../tsconfig.json", "compilerOptions": { "incremental": true }, "include": ["app/**/*.ts", "app/**/*.tsx", "middleware.ts", ".next-admin/types/**/*.ts"] }

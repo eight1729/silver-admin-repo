@@ -1,0 +1,1635 @@
+{
+  "components": {
+    "schemas": {
+      "AdminCandidateResponse": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "line_linked": {
+            "title": "Line Linked",
+            "type": "boolean"
+          },
+          "member_id": {
+            "title": "Member Id",
+            "type": "string"
+          },
+          "preference_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preference Summary"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "member_id",
+          "display_name",
+          "line_linked",
+          "eligible",
+          "reason",
+          "selected"
+        ],
+        "title": "AdminCandidateResponse",
+        "type": "object"
+      },
+      "AdminDeliveriesResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminDeliveryResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/AdminDeliverySummary"
+          }
+        },
+        "required": [
+          "items",
+          "summary"
+        ],
+        "title": "AdminDeliveriesResponse",
+        "type": "object"
+      },
+      "AdminDeliveryResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "delivery_id": {
+            "format": "uuid",
+            "title": "Delivery Id",
+            "type": "string"
+          },
+          "member_id": {
+            "title": "Member Id",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeliveryStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "member_id",
+          "status",
+          "reason_code",
+          "created_at",
+          "sent_at",
+          "updated_at"
+        ],
+        "title": "AdminDeliveryResponse",
+        "type": "object"
+      },
+      "AdminDeliverySummary": {
+        "properties": {
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "sent": {
+            "title": "Sent",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "unknown": {
+            "title": "Unknown",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending",
+          "sent",
+          "failed",
+          "unknown",
+          "skipped"
+        ],
+        "title": "AdminDeliverySummary",
+        "type": "object"
+      },
+      "AdminJobDetailResponse": {
+        "properties": {
+          "conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Conditions",
+            "type": "array"
+          },
+          "contact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "job_url": {
+            "title": "Job Url",
+            "type": "string"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "openings": {
+            "default": 1,
+            "title": "Openings",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "title",
+          "description",
+          "location",
+          "conditions",
+          "status",
+          "version",
+          "job_url",
+          "contact"
+        ],
+        "title": "AdminJobDetailResponse",
+        "type": "object"
+      },
+      "AdminJobSummaryResponse": {
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "openings": {
+            "default": 1,
+            "title": "Openings",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "work_days": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Days"
+          },
+          "work_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Time"
+          }
+        },
+        "required": [
+          "job_id",
+          "title",
+          "location",
+          "status",
+          "version",
+          "summary"
+        ],
+        "title": "AdminJobSummaryResponse",
+        "type": "object"
+      },
+      "AdminLineSendModeResponse": {
+        "properties": {
+          "blocking_reasons": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocking Reasons",
+            "type": "array"
+          },
+          "live_send_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Live Send Enabled"
+          },
+          "max_recipients": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Recipients"
+          },
+          "message_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Prefix"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "ready": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ready"
+          }
+        },
+        "required": [
+          "mode",
+          "max_recipients",
+          "message_prefix"
+        ],
+        "title": "AdminLineSendModeResponse",
+        "type": "object"
+      },
+      "AdminMessageResponse": {
+        "properties": {
+          "greeting": {
+            "title": "Greeting",
+            "type": "string"
+          },
+          "introduction": {
+            "title": "Introduction",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "greeting",
+          "introduction",
+          "note"
+        ],
+        "title": "AdminMessageResponse",
+        "type": "object"
+      },
+      "AdminNotificationLinkResponse": {
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "AdminNotificationLinkResponse",
+        "type": "object"
+      },
+      "AdminOperationCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "greeting": {
+            "minLength": 1,
+            "title": "Greeting",
+            "type": "string"
+          },
+          "introduction": {
+            "minLength": 1,
+            "title": "Introduction",
+            "type": "string"
+          },
+          "job_id": {
+            "minLength": 1,
+            "title": "Job Id",
+            "type": "string"
+          },
+          "note": {
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          },
+          "notification_type": {
+            "$ref": "#/components/schemas/NotificationType"
+          }
+        },
+        "required": [
+          "job_id",
+          "notification_type",
+          "greeting",
+          "introduction",
+          "note"
+        ],
+        "title": "AdminOperationCreateRequest",
+        "type": "object"
+      },
+      "AdminOperationResponse": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "job_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Version"
+          },
+          "message": {
+            "$ref": "#/components/schemas/AdminMessageResponse"
+          },
+          "notification_type": {
+            "$ref": "#/components/schemas/NotificationType"
+          },
+          "operation_id": {
+            "format": "uuid",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "selected_count": {
+            "title": "Selected Count",
+            "type": "integer"
+          },
+          "send_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Send Requested At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OperationStatus"
+          },
+          "target_count": {
+            "title": "Target Count",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "validated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated At"
+          }
+        },
+        "required": [
+          "operation_id",
+          "job_id",
+          "job_version",
+          "notification_type",
+          "message",
+          "status",
+          "target_count",
+          "selected_count",
+          "validated_at",
+          "send_requested_at",
+          "completed_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminOperationResponse",
+        "type": "object"
+      },
+      "AdminOperationUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "greeting": {
+            "minLength": 1,
+            "title": "Greeting",
+            "type": "string"
+          },
+          "introduction": {
+            "minLength": 1,
+            "title": "Introduction",
+            "type": "string"
+          },
+          "note": {
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "greeting",
+          "introduction",
+          "note"
+        ],
+        "title": "AdminOperationUpdateRequest",
+        "type": "object"
+      },
+      "AdminResetResponse": {
+        "properties": {
+          "reset": {
+            "title": "Reset",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reset"
+        ],
+        "title": "AdminResetResponse",
+        "type": "object"
+      },
+      "AdminTargetsUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "selected_member_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Member Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "selected_member_ids"
+        ],
+        "title": "AdminTargetsUpdateRequest",
+        "type": "object"
+      },
+      "AdminValidationResponse": {
+        "properties": {
+          "can_proceed": {
+            "title": "Can Proceed",
+            "type": "boolean"
+          },
+          "external_system_blocked": {
+            "title": "External System Blocked",
+            "type": "boolean"
+          },
+          "operation_id": {
+            "format": "uuid",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "selected_count": {
+            "title": "Selected Count",
+            "type": "integer"
+          },
+          "sendable_count": {
+            "title": "Sendable Count",
+            "type": "integer"
+          },
+          "skipped_count": {
+            "title": "Skipped Count",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OperationStatus"
+          },
+          "version_changed": {
+            "title": "Version Changed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation_id",
+          "status",
+          "can_proceed",
+          "selected_count",
+          "sendable_count",
+          "skipped_count",
+          "reasons",
+          "version_changed",
+          "external_system_blocked"
+        ],
+        "title": "AdminValidationResponse",
+        "type": "object"
+      },
+      "DeliveryStatus": {
+        "enum": [
+          "pending",
+          "sent",
+          "failed",
+          "unknown",
+          "skipped"
+        ],
+        "title": "DeliveryStatus",
+        "type": "string"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "JobStatus": {
+        "enum": [
+          "draft",
+          "published",
+          "paused",
+          "closed",
+          "cancelled",
+          "unknown"
+        ],
+        "title": "JobStatus",
+        "type": "string"
+      },
+      "NotificationType": {
+        "enum": [
+          "new_job_match",
+          "existing_job_match",
+          "custom_job"
+        ],
+        "title": "NotificationType",
+        "type": "string"
+      },
+      "OperationStatus": {
+        "enum": [
+          "draft",
+          "ready",
+          "validating",
+          "sending",
+          "completed",
+          "completed_with_errors",
+          "blocked_external_system",
+          "cancelled"
+        ],
+        "title": "OperationStatus",
+        "type": "string"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "Silver Admin Backend",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/admin/demo/reset": {
+      "post": {
+        "operationId": "reset_demo_admin_demo_reset_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminResetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reset Demo",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/jobs": {
+      "get": {
+        "operationId": "list_jobs_admin_jobs_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminJobSummaryResponse"
+                  },
+                  "title": "Response List Jobs Admin Jobs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Jobs",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/jobs/{job_id}": {
+      "get": {
+        "operationId": "get_job_admin_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminJobDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Job",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/jobs/{job_id}/candidates": {
+      "get": {
+        "operationId": "list_candidates_admin_jobs__job_id__candidates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminCandidateResponse"
+                  },
+                  "title": "Response List Candidates Admin Jobs  Job Id  Candidates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Candidates",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/jobs/{job_id}/notification-link": {
+      "get": {
+        "operationId": "get_notification_link_admin_jobs__job_id__notification_link_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminNotificationLinkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Notification Link",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/line-send-mode": {
+      "get": {
+        "operationId": "get_line_send_mode_admin_line_send_mode_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLineSendModeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Line Send Mode",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/notification-operations": {
+      "post": {
+        "operationId": "create_operation_admin_notification_operations_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminOperationCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Operation",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/notification-operations/{operation_id}": {
+      "get": {
+        "operationId": "get_operation_admin_notification_operations__operation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Operation",
+        "tags": [
+          "admin"
+        ]
+      },
+      "put": {
+        "operationId": "update_operation_admin_notification_operations__operation_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminOperationUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Operation",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/notification-operations/{operation_id}/deliveries": {
+      "get": {
+        "operationId": "list_deliveries_admin_notification_operations__operation_id__deliveries_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDeliveriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Deliveries",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/notification-operations/{operation_id}/send": {
+      "post": {
+        "operationId": "send_operation_admin_notification_operations__operation_id__send_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Send Operation",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/notification-operations/{operation_id}/targets": {
+      "put": {
+        "operationId": "replace_targets_admin_notification_operations__operation_id__targets_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminTargetsUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Replace Targets",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/notification-operations/{operation_id}/validate": {
+      "post": {
+        "operationId": "validate_operation_admin_notification_operations__operation_id__validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminValidationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Validate Operation",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    }
+  },
+  "x-contract-owner": "admin",
+  "x-contract-version": "1.0.0"
+}

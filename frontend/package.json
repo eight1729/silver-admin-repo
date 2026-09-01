@@ -1,0 +1,27 @@
+{
+  "name": "silver-admin-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev targets/admin",
+    "build": "next build targets/admin",
+    "start": "next start targets/admin",
+    "lint": "next lint targets/admin",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test app/admin/*.test.ts",
+    "test:config": "node --test config/load-target-env.test.js"
+  },
+  "dependencies": {
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.0.0",
+    "eslint": "^8.0.0",
+    "eslint-config-next": "^14.2.0"
+  }
+}

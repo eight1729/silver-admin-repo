@@ -1,0 +1,8 @@
+{
+  "scenario_id": "timeout",
+  "external_organization_id": "org-fake-silver-001",
+  "error": {
+    "type": "ExternalSystemUnavailableError",
+    "message": "connection timed out after 30s"
+  }
+}

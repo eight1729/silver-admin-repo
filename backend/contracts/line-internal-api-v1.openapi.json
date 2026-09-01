@@ -1,0 +1,706 @@
+{
+  "components": {
+    "schemas": {
+      "BusinessNotificationMessage": {
+        "additionalProperties": false,
+        "description": "Admin-owned editable business message, not a LINE provider payload.",
+        "properties": {
+          "greeting": {
+            "minLength": 1,
+            "title": "Greeting",
+            "type": "string"
+          },
+          "introduction": {
+            "minLength": 1,
+            "title": "Introduction",
+            "type": "string"
+          },
+          "note": {
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "greeting",
+          "introduction",
+          "note"
+        ],
+        "title": "BusinessNotificationMessage",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LiffDeepLinkRequest": {
+        "additionalProperties": false,
+        "description": "Inputs the LINE side needs to resolve a canonical LIFF job link.",
+        "properties": {
+          "job_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Job Id",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ServiceOrganizationScope"
+          }
+        },
+        "required": [
+          "scope",
+          "job_id"
+        ],
+        "title": "LiffDeepLinkRequest",
+        "type": "object"
+      },
+      "LiffDeepLinkResponse": {
+        "additionalProperties": false,
+        "description": "Canonical link resolved by the LINE side without exposing URL rules.",
+        "properties": {
+          "canonical_deep_link": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Canonical Deep Link",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canonical_deep_link"
+        ],
+        "title": "LiffDeepLinkResponse",
+        "type": "object"
+      },
+      "LinkageStatusBatchRequest": {
+        "additionalProperties": false,
+        "description": "Snapshot query only; command handling must re-check recipient linkage.",
+        "properties": {
+          "external_member_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "External Member Ids",
+            "type": "array"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ServiceOrganizationScope"
+          }
+        },
+        "required": [
+          "scope",
+          "external_member_ids"
+        ],
+        "title": "LinkageStatusBatchRequest",
+        "type": "object"
+      },
+      "LinkageStatusBatchResponse": {
+        "additionalProperties": false,
+        "description": "LINE-linkage snapshot exposing no LINE or provider identity.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LinkageStatusItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "LinkageStatusBatchResponse",
+        "type": "object"
+      },
+      "LinkageStatusItem": {
+        "additionalProperties": false,
+        "properties": {
+          "external_member_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "External Member Id",
+            "type": "string"
+          },
+          "line_linked": {
+            "title": "Line Linked",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "external_member_id",
+          "line_linked"
+        ],
+        "title": "LinkageStatusItem",
+        "type": "object"
+      },
+      "NotificationCommand": {
+        "additionalProperties": false,
+        "description": "One immutable delivery request for exactly one external member.",
+        "properties": {
+          "business_message": {
+            "$ref": "#/components/schemas/BusinessNotificationMessage"
+          },
+          "command_id": {
+            "format": "uuid",
+            "title": "Command Id",
+            "type": "string"
+          },
+          "correlation_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Correlation Id",
+            "type": "string"
+          },
+          "external_member_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "External Member Id",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "job_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Job Id",
+            "type": "string"
+          },
+          "job_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Job Version",
+            "type": "string"
+          },
+          "message_hash": {
+            "description": "Lowercase SHA-256 hex digest of the canonical business message.",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Message Hash",
+            "type": "string"
+          },
+          "message_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Message Version",
+            "type": "string"
+          },
+          "operation_id": {
+            "format": "uuid",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ServiceOrganizationScope"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id",
+          "operation_id",
+          "target_id",
+          "scope",
+          "external_member_id",
+          "job_id",
+          "job_version",
+          "business_message",
+          "message_version",
+          "message_hash",
+          "idempotency_key",
+          "correlation_id",
+          "requested_at"
+        ],
+        "title": "NotificationCommand",
+        "type": "object"
+      },
+      "NotificationCommandStatus": {
+        "description": "LINE-side command/provider status exposed to the Admin consumer.\n\n``accepted`` means the LINE side durably accepted the command; it does not\nmean the provider sent it. ``pending`` means provider delivery is pending.\n``sent``, ``failed``, and ``unknown`` describe provider-level outcomes.\n``rejected`` and ``recipient_not_linked`` are LINE-side terminal command\noutcomes. This enum is not the Admin business-level result/status.",
+        "enum": [
+          "accepted",
+          "pending",
+          "sent",
+          "failed",
+          "unknown",
+          "rejected",
+          "recipient_not_linked"
+        ],
+        "title": "NotificationCommandStatus",
+        "type": "string"
+      },
+      "NotificationResult": {
+        "additionalProperties": false,
+        "description": "Sanitized LINE-side result; provider request identity is not exposed.",
+        "properties": {
+          "accepted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          },
+          "command_id": {
+            "format": "uuid",
+            "title": "Command Id",
+            "type": "string"
+          },
+          "delivery_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LINE-owned logical delivery identifier assigned after command acceptance; this is not a provider request ID.",
+            "title": "Delivery Id"
+          },
+          "external_member_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "External Member Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "format": "uuid",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NotificationCommandStatus"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id",
+          "operation_id",
+          "target_id",
+          "external_member_id",
+          "status",
+          "updated_at"
+        ],
+        "title": "NotificationResult",
+        "type": "object"
+      },
+      "ServiceOrganizationScope": {
+        "additionalProperties": false,
+        "description": "Stable cross-system scope.\n\nBoth values are external-business contract identifiers. ``organization_id``\nidentifies the organization and ``service_id`` identifies its business\nservice. The LINE side resolves its private channel, LIFF, and Messaging\nconfiguration from the external ``service_id``; the ID is not itself a LINE\nchannel, account, or configuration identifier.",
+        "properties": {
+          "organization_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "service_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Service Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_id",
+          "service_id"
+        ],
+        "title": "ServiceOrganizationScope",
+        "type": "object"
+      },
+      "StagingSendReadinessRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/ServiceOrganizationScope"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "title": "StagingSendReadinessRequest",
+        "type": "object"
+      },
+      "StagingSendReadinessResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "blocking_reasons": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocking Reasons",
+            "type": "array"
+          },
+          "live_send_enabled": {
+            "title": "Live Send Enabled",
+            "type": "boolean"
+          },
+          "max_recipients": {
+            "title": "Max Recipients",
+            "type": "integer"
+          },
+          "message_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Prefix"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready",
+          "live_send_enabled",
+          "max_recipients"
+        ],
+        "title": "StagingSendReadinessResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "LineInternalBearer": {
+        "description": "Admin backend service credential",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Versioned contract owned by the LINE API provider. This Phase 1 application describes interfaces only.",
+    "title": "Silver LINE Internal API Contract",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/internal/v1/liff-deep-links:resolve": {
+      "post": {
+        "description": "Contract declaration only; no runtime implementation in Phase 1.",
+        "operationId": "resolve_liff_deep_link_internal_v1_liff_deep_links_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiffDeepLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiffDeepLinkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "LineInternalBearer": []
+          }
+        ],
+        "summary": "Resolve Liff Deep Link",
+        "tags": [
+          "liff-deep-link"
+        ]
+      }
+    },
+    "/internal/v1/line-linkages:batch-get": {
+      "post": {
+        "description": "Contract declaration only; no runtime implementation in Phase 1.",
+        "operationId": "get_linkage_statuses_internal_v1_line_linkages_batch_get_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkageStatusBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkageStatusBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "LineInternalBearer": []
+          }
+        ],
+        "summary": "Get Linkage Statuses",
+        "tags": [
+          "line-linkage"
+        ]
+      }
+    },
+    "/internal/v1/notification-commands": {
+      "post": {
+        "description": "Contract declaration only; no runtime implementation in Phase 1.",
+        "operationId": "accept_notification_command_internal_v1_notification_commands_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "LineInternalBearer": []
+          }
+        ],
+        "summary": "Accept Notification Command",
+        "tags": [
+          "notification-command"
+        ]
+      }
+    },
+    "/internal/v1/notification-commands/{command_id}": {
+      "get": {
+        "description": "Contract declaration only; no runtime implementation in Phase 1.",
+        "operationId": "get_notification_result_internal_v1_notification_commands__command_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "command_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Command Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "LineInternalBearer": []
+          }
+        ],
+        "summary": "Get Notification Result",
+        "tags": [
+          "notification-command"
+        ]
+      }
+    },
+    "/internal/v1/staging-send-readiness:check": {
+      "post": {
+        "description": "Contract declaration only; no runtime implementation in Phase 1.",
+        "operationId": "check_staging_send_readiness_internal_v1_staging_send_readiness_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StagingSendReadinessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagingSendReadinessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "LineInternalBearer": []
+          }
+        ],
+        "summary": "Check Staging Send Readiness",
+        "tags": [
+          "staging-send-readiness"
+        ]
+      }
+    }
+  },
+  "x-contract-owner": "LINE Repository",
+  "x-contract-version": "1.0.0",
+  "x-phase": "phase-1-contract-only"
+}

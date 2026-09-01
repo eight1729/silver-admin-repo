@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]>=2.0
+# PostgreSQL is the single database everywhere (local, tests, production).
+psycopg[binary]
+pydantic-settings
+httpx
+PyJWT[crypto]>=2.8

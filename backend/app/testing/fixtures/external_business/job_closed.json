@@ -1,0 +1,60 @@
+{
+  "scenario_id": "job_closed",
+  "external_organization_id": "org-fake-silver-001",
+  "link_eligibility": {
+    "external_member_id": "M005",
+    "eligible": true,
+    "reason_code": null,
+    "checked_at": "2025-06-03T09:00:00Z"
+  },
+  "recommended_jobs": [
+    {
+      "external_job_id": "JOB-003",
+      "title": "公園清掃スタッフ（募集終了）",
+      "summary": "公園の清掃・整備業務",
+      "work_location_summary": "区内各公園",
+      "work_schedule_summary": "週3日・7時〜10時",
+      "application_deadline": null,
+      "status": "closed",
+      "version": "v3",
+      "updated_at": "2025-05-01T08:00:00Z"
+    }
+  ],
+  "job_detail": {
+    "external_job_id": "JOB-003",
+    "title": "公園清掃スタッフ（募集終了）",
+    "description": "区内公園の清掃・整備を行います。（この求人は募集終了です）",
+    "work_location": "東京都内（架空区）各公園",
+    "work_schedule_text": "週3日、7時〜10時",
+    "application_deadline": null,
+    "required_conditions": ["60歳以上", "屋外作業可能な方"],
+    "status": "closed",
+    "version": "v3",
+    "updated_at": "2025-05-01T08:00:00Z",
+    "staff_notes": null
+  },
+  "candidate_members": [
+    {
+      "external_member_id": "M005",
+      "display_label": null,
+      "eligible": true,
+      "reason_codes": [],
+      "match_rank": 1
+    }
+  ],
+  "validation_result": {
+    "external_job_id": "JOB-003",
+    "job_eligible": false,
+    "current_job_version": "v3",
+    "job_reason_code": "job_closed",
+    "members": [
+      {
+        "external_member_id": "M005",
+        "eligible": false,
+        "reason_code": "job_closed"
+      }
+    ],
+    "validated_at": "2025-06-03T10:00:00Z",
+    "external_request_id": "fake-req-closed-001"
+  }
+}
