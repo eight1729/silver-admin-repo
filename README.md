@@ -134,6 +134,8 @@ Admin Backend の canonical entrypoint は次のファイルです。
 backend/app/main_admin.py
 ```
 
+ローカル起動手順は [docs/LOCAL_RUN.md](docs/LOCAL_RUN.md) を参照してください。
+
 ## API 契約
 
 Admin Repository には、Admin 自身の API 契約に加えて、LINE Repository が提供する内部 API の配布済み契約を保持します。
