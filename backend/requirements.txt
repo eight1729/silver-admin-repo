@@ -5,4 +5,7 @@ sqlalchemy[asyncio]>=2.0
 psycopg[binary]
 pydantic-settings
 httpx
+# ic 業務 API を Cloud Run の ID トークンで呼ぶ（app/adapter/external_business_http.py）と、
+# Cloud Scheduler の OIDC を検証する（app/api/routes/internal_line.py）ために追加
+google-auth
 PyJWT[crypto]>=2.8

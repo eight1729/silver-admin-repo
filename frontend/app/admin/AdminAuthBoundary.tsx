@@ -2,6 +2,10 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 
+// ★副作用のための import。**読み込み時**に静的トークンの provider を登録する。
+//   useEffect で登録すると子の effect のほうが先に走り、最初の取得が 401 になる
+import "../lib/admin-static-token";
+
 export function AdminAuthBoundary({ children }: { children: ReactNode }) {
   const [denied, setDenied] = useState<401 | 403 | null>(null);
   useEffect(() => {

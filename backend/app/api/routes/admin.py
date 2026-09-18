@@ -7,6 +7,7 @@ from app.api.admin_entry_deps import (
     get_admin_application_service,
     get_admin_line_send_mode as get_admin_line_send_mode_provider,
     get_admin_line_send_mode_for_runtime,
+    line_send_is_live,
 )
 from app.api.admin_auth import (
     require_admin_operator,
@@ -60,20 +61,33 @@ def _request_id() -> str:
     return f"admin-{uuid4()}"
 
 
+def _composition(request: Request):
+    """local integration / 本番のどちらの合成でも同じ口で取る。"""
+    return getattr(request.app.state, "admin_composition", None) or getattr(
+        request.app.state, "admin_local_integration", None
+    )
+
+
+async def _send_readiness(request: Request, service_id: str) -> dict:
+    runtime_settings = getattr(request.app.state, "admin_runtime_settings", None)
+    if runtime_settings is None:
+        return get_admin_line_send_mode_provider()
+    return await get_admin_line_send_mode_for_runtime(
+        runtime_settings,
+        integration=_composition(request),
+        service_id=service_id,
+    )
+
+
 @router.get("/line-send-mode", response_model=AdminLineSendModeResponse)
 async def get_line_send_mode(
     request: Request,
     staff: AuthenticatedStaff = Depends(require_admin_viewer),
     fallback_mode: dict = Depends(get_admin_line_send_mode_provider),
 ):
-    runtime_settings = getattr(request.app.state, "admin_runtime_settings", None)
-    if runtime_settings is None or not runtime_settings.admin_local_integration_mode:
+    if getattr(request.app.state, "admin_runtime_settings", None) is None:
         return fallback_mode
-    return await get_admin_line_send_mode_for_runtime(
-        runtime_settings, integration=getattr(
-            request.app.state, "admin_local_integration", None
-        ), service_id=staff.service_id,
-    )
+    return await _send_readiness(request, staff.service_id)
 
 
 def _translate(exc: Exception) -> None:
@@ -350,10 +364,49 @@ async def validate_operation(
     response_model=AdminOperationResponse,
 )
 async def send_operation(
+    request: Request,
     operation_id: UUID,
     staff: AuthenticatedStaff = Depends(require_admin_operator),
     service: AdminApplicationService = Depends(get_admin_application_service),
 ):
+    # ★送信の直前に LINE 側の readiness を見る。現行の send 経路は readiness を
+    #   一切見ておらず、1 名制限も live 可否も無視して command を投げていた。
+    #   **LINE 側が 1 名制限を持つかどうかに依存せず、Admin 側で止める。**
+    #
+    #   ただしゲートをかけるのは「実際に LINE へ command が飛ぶ構成」のときだけ。
+    #   fake provider は常に ready:false を返すので、無条件にかけると
+    #   **local の Fake 送信フローが必ず 409 になり、先方の手元の動作確認が壊れる**
+    runtime_settings = getattr(request.app.state, "admin_runtime_settings", None)
+    if runtime_settings is not None and line_send_is_live(runtime_settings):
+        readiness = await _send_readiness(request, staff.service_id)
+        if not readiness.get("ready"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "line_not_ready",
+                    "blocking_reasons": list(readiness.get("blocking_reasons") or ()),
+                },
+            )
+        # ★対象の件数は readiness を取った**後**に読む。先に読むと、LINE への
+        #   問い合わせに出ている間に増やされた分を見落とす（窓は狭まるが消えない。
+        #   本質的な解決は送信処理の中での再検証で、先方と相談する論点に残す）
+        max_recipients = readiness.get("max_recipients")
+        if isinstance(max_recipients, int):
+            try:
+                current = await service.get_operation(staff.service_id, operation_id)
+            except Exception as exc:
+                _translate(exc)
+            selected = sum(1 for item in current.targets if item.selected)
+            if selected > max_recipients:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "line_recipient_limit_exceeded",
+                        "max_recipients": max_recipients,
+                        "selected_count": selected,
+                    },
+                )
+
     try:
         await service.send(
             service_id=staff.service_id,
@@ -401,9 +454,15 @@ async def list_deliveries(
 
 @router.post("/demo/reset", response_model=AdminResetResponse)
 async def reset_demo(
+    request: Request,
     staff: AuthenticatedStaff = Depends(require_admin_role),
     service: AdminApplicationService = Depends(get_admin_application_service),
 ):
+    # ★これは台帳を丸ごと消す。APP_ENV=staging では誰でも Admin ロールになるので、
+    #   設定で明示的に許したときだけ生かす。staging / production は既定で false（台帳の初期化は SQL で行う）
+    runtime_settings = getattr(request.app.state, "admin_runtime_settings", None)
+    if runtime_settings is not None and not runtime_settings.demo_reset_enabled:
+        raise HTTPException(status_code=404, detail={"error": "resource_not_found"})
     try:
         return AdminResetResponse(reset=(await service.reset(staff.service_id)).reset)
     except Exception as exc:
