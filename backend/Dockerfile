@@ -14,4 +14,4 @@ COPY app ./app
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "uvicorn app.main_admin:app --host 0.0.0.0 --port ${PORT:-8080}"]
