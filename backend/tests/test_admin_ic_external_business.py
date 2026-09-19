@@ -901,3 +901,24 @@ async def test_reconcile_は_email_verified_の欠落を通さない(monkeypatch
             RECONCILE_PATH, headers={"Authorization": "Bearer scheduler-token"}
         )
     assert response.status_code == 403
+
+
+def test_ID_トークンに要る依存が実際に入っている():
+    """★依存の宣言漏れを、デプロイ前にここで落とす。
+
+    ID トークンを作る `_IdTokenCache._fetch` と、Scheduler の OIDC を検証する
+    `_verify_google_id_token` は、どちらも**関数の中で遅延 import** している。
+    そしてこのファイルのテストは**その 2 つを必ず差し替える**ので、
+    **遅延 import は一度も実行されない。**
+
+    そのため `requests` が入っていなくても全件が緑のまま通り、
+    デプロイして初めて `/admin/jobs` が 503（ID トークンを作れない）で分かる。
+    実際にそれが起きたので、import そのものをここで踏む。
+
+    `google-auth` は `requests` を依存に含めない。`requirements.txt` の両方が要る。
+    """
+    from google.auth.transport.requests import Request           # noqa: F401
+    from google.oauth2 import id_token
+
+    assert callable(id_token.fetch_id_token)        # _IdTokenCache._fetch が使う
+    assert callable(id_token.verify_oauth2_token)   # reconcile の caller 照合が使う
