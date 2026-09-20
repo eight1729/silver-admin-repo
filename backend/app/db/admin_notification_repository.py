@@ -1,11 +1,11 @@
 """SQLAlchemy Core persistent adapter for Admin-owned notification data."""
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Iterable, Mapping
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import delete, insert, select, update, and_, or_
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from sqlalchemy.exc import IntegrityError
 
@@ -25,6 +25,7 @@ from app.domain.errors.admin_notification_repository import (
     OperationAlreadyExistsError,
     OperationNotFoundError,
     RepositoryStateError,
+    ReservedNotificationMutationError,
     SendAttemptAlreadyExistsError,
     ServiceScopeViolationError,
 )
@@ -66,12 +67,7 @@ def _plain_json(value):
 
 
 class SqlAlchemyAdminNotificationRepository:
-    """Synchronous, transaction-per-operation adapter over a SQLAlchemy Engine.
-
-    Multi-row operations use one database transaction and row locking where a
-    concurrent send reservation must be excluded. Outbox persistence is
-    intentionally not part of this Phase 2 adapter.
-    """
+    """Async adapter with operation-row locks for reservation and projection."""
 
     def __init__(self, engine: AsyncEngine, *, clock=None) -> None:
         self._engine = engine
@@ -79,6 +75,19 @@ class SqlAlchemyAdminNotificationRepository:
 
     def _now(self) -> datetime:
         return _utc(self._clock(), "clock result")
+
+    @staticmethod
+    def _guard_snapshot(current, proposed):
+        if current.send_requested_at is not None:
+            fields = ("message", "message_version", "message_hash", "job_id", "job_version",
+                      "notification_type", "validation_snapshot", "validated_at", "send_requested_at")
+            if any(getattr(current, name) != getattr(proposed, name) for name in fields):
+                raise ReservedNotificationMutationError("reserved notification snapshot is immutable")
+
+    @staticmethod
+    def _guard_targets(operation):
+        if operation.send_requested_at is not None:
+            raise ReservedNotificationMutationError("reserved notification targets are immutable")
 
     @staticmethod
     def _operation_values(operation: NotificationOperationRecord) -> dict:
@@ -212,6 +221,7 @@ class SqlAlchemyAdminNotificationRepository:
     async def update_operation(self, service_id, operation_id, operation):
         async with self._engine.begin() as conn:
             current = await self._require_operation(conn, service_id, operation_id, lock=True)
+            self._guard_snapshot(current, operation)
             if operation.operation_id != operation_id:
                 raise RepositoryStateError("operation_id cannot be changed")
             if operation.service_id != service_id:
@@ -234,6 +244,7 @@ class SqlAlchemyAdminNotificationRepository:
                 current = await self._require_operation(
                     conn, service_id, operation_id, lock=True
                 )
+                self._guard_snapshot(current, operation)
                 if operation.operation_id != operation_id:
                     raise RepositoryStateError("operation_id cannot be changed")
                 if operation.service_id != service_id:
@@ -279,7 +290,8 @@ class SqlAlchemyAdminNotificationRepository:
             _utc(target.created_at, "created_at")
             _utc(target.updated_at, "updated_at")
         async with self._engine.begin() as conn:
-            await self._require_operation(conn, service_id, operation_id, lock=True)
+            current = await self._require_operation(conn, service_id, operation_id, lock=True)
+            self._guard_targets(current)
             await conn.execute(delete(admin_notification_targets).where(admin_notification_targets.c.operation_id == str(operation_id)))
             if pending:
                 await conn.execute(insert(admin_notification_targets), [
@@ -315,6 +327,8 @@ class SqlAlchemyAdminNotificationRepository:
                 current = await self._require_operation(
                     conn, service_id, operation_id, lock=True
                 )
+                self._guard_targets(current)
+                self._guard_snapshot(current, operation)
                 if operation.operation_id != operation_id:
                     raise RepositoryStateError("operation_id cannot be changed")
                 if operation.service_id != service_id:
@@ -454,6 +468,8 @@ class SqlAlchemyAdminNotificationRepository:
             "requested_at": _utc(item.requested_at, "requested_at"),
             "created_at": _utc(item.created_at, "created_at"),
             "state": item.state.value,
+            "lease_expires_at": _optional_utc(item.lease_expires_at, "lease_expires_at"),
+            "claim_token": str(item.claim_token) if item.claim_token else None,
         }
 
     @staticmethod
@@ -480,6 +496,8 @@ class SqlAlchemyAdminNotificationRepository:
             requested_at=_loaded_utc(row["requested_at"]),
             created_at=_loaded_utc(row["created_at"]),
             state=NotificationOutboxState(row["state"]),
+            lease_expires_at=_loaded_utc(row["lease_expires_at"]),
+            claim_token=UUID(row["claim_token"]) if row["claim_token"] else None,
         )
 
     async def begin_send_attempt(
@@ -491,6 +509,7 @@ class SqlAlchemyAdminNotificationRepository:
         event,
         *,
         send_requested_at,
+        expected_operation=None,
     ):
         send_requested_at = _utc(send_requested_at, "send_requested_at")
         outbox = tuple(outbox_records)
@@ -500,6 +519,8 @@ class SqlAlchemyAdminNotificationRepository:
                 has_delivery = (await conn.execute(select(admin_notification_deliveries.c.delivery_id).where(admin_notification_deliveries.c.operation_id == str(operation_id)).limit(1))).first()
                 if operation.send_requested_at is not None or has_delivery:
                     raise SendAttemptAlreadyExistsError("notification operation already has a send attempt")
+                if expected_operation is not None and operation != expected_operation:
+                    raise ReservedNotificationMutationError("operation changed before send reservation")
                 if any(item.operation_id != operation_id or item.service_id != service_id for item in outbox):
                     raise RepositoryStateError("outbox scope does not match operation")
                 pending = await self._add_deliveries(conn, operation_id, deliveries)
@@ -534,18 +555,27 @@ class SqlAlchemyAdminNotificationRepository:
             NotificationOutboxState.RETRYABLE_FAILURE.value,
         )
         async with self._engine.begin() as conn:
-            await self._require_operation(conn, service_id, operation_id)
+            operation = await self._require_operation(conn, service_id, operation_id, lock=True)
+            if operation.status is OperationStatus.CANCELLED:
+                return ()
+            now = self._now()
+            token = uuid4()
+            expires = now + timedelta(seconds=60)
             rows = (await conn.execute(
                 select(admin_notification_outbox)
                 .where(
                     admin_notification_outbox.c.operation_id == str(operation_id),
-                    admin_notification_outbox.c.state.in_(claimable),
+                    or_(admin_notification_outbox.c.state.in_(claimable), and_(
+                        admin_notification_outbox.c.state == NotificationOutboxState.DELIVERING.value,
+                        or_(admin_notification_outbox.c.lease_expires_at.is_(None),
+                            admin_notification_outbox.c.lease_expires_at <= now))),
                 )
                 .order_by(
+                    admin_notification_outbox.c.lease_expires_at.asc().nullsfirst(),
                     admin_notification_outbox.c.created_at,
                     admin_notification_outbox.c.outbox_id,
                 )
-                .with_for_update()
+                .limit(1).with_for_update()
             )).mappings().all()
             ids = tuple(row["outbox_id"] for row in rows)
             if ids:
@@ -553,22 +583,23 @@ class SqlAlchemyAdminNotificationRepository:
                     update(admin_notification_outbox)
                     .where(
                         admin_notification_outbox.c.outbox_id.in_(ids),
-                        admin_notification_outbox.c.state.in_(claimable),
                     )
-                    .values(state=NotificationOutboxState.DELIVERING.value)
+                    .values(state=NotificationOutboxState.DELIVERING.value,
+                            lease_expires_at=expires, claim_token=str(token))
                 )
         return tuple(
             replace(
-                self._outbox(row), state=NotificationOutboxState.DELIVERING
+                self._outbox(row), state=NotificationOutboxState.DELIVERING,
+                lease_expires_at=expires, claim_token=token
             )
             for row in rows
         )
 
     async def update_outbox_state(
-        self, service_id, operation_id, outbox_id, state
+        self, service_id, operation_id, outbox_id, state, *, claim_token=None
     ):
         async with self._engine.begin() as conn:
-            await self._require_operation(conn, service_id, operation_id)
+            operation = await self._require_operation(conn, service_id, operation_id, lock=True)
             row = (await conn.execute(
                 select(admin_notification_outbox).where(
                     admin_notification_outbox.c.outbox_id == str(outbox_id),
@@ -577,17 +608,122 @@ class SqlAlchemyAdminNotificationRepository:
             )).mappings().first()
             if row is None:
                 raise RepositoryStateError("notification outbox record was not found")
+            if (row["state"] != NotificationOutboxState.DELIVERING.value
+                    or claim_token is None or row["claim_token"] != str(claim_token)):
+                return self._outbox(row)
+            if state not in (NotificationOutboxState.ACCEPTED, NotificationOutboxState.RETRYABLE_FAILURE,
+                             NotificationOutboxState.PERMANENT_FAILURE):
+                raise RepositoryStateError("invalid submission outcome")
             await conn.execute(
                 update(admin_notification_outbox)
                 .where(admin_notification_outbox.c.outbox_id == str(outbox_id))
-                .values(state=state.value)
+                .values(state=state.value, claim_token=None,
+                        lease_expires_at=self._now() if state is NotificationOutboxState.RETRYABLE_FAILURE else None)
             )
-        return replace(self._outbox(row), state=state)
+            if state is NotificationOutboxState.PERMANENT_FAILURE:
+                await self._fail_submission(conn, row)
+            await self._aggregate(conn, operation)
+        return replace(self._outbox(row), state=state, claim_token=None,
+                       lease_expires_at=self._now() if state is NotificationOutboxState.RETRYABLE_FAILURE else None)
+
+    async def _fail_submission(self, conn, row):
+        await conn.execute(update(admin_notification_deliveries).where(
+            admin_notification_deliveries.c.operation_id == row["operation_id"],
+            admin_notification_deliveries.c.member_id == row["external_member_id"],
+            admin_notification_deliveries.c.status == DeliveryStatus.PENDING.value,
+        ).values(status=DeliveryStatus.FAILED.value, error_code="line_submission_permanent_failure",
+                 error_message=None, updated_at=self._now()))
+
+    async def _aggregate(self, conn, operation):
+        statuses = (await conn.execute(select(admin_notification_deliveries.c.status).where(
+            admin_notification_deliveries.c.operation_id == str(operation.operation_id)
+        ))).scalars().all()
+        if not statuses or operation.send_requested_at is None or operation.status is OperationStatus.CANCELLED:
+            return operation
+        if DeliveryStatus.PENDING.value in statuses:
+            status = OperationStatus.SENDING
+        elif all(value == DeliveryStatus.SENT.value for value in statuses):
+            status = OperationStatus.COMPLETED
+        else:
+            status = OperationStatus.COMPLETED_WITH_ERRORS
+        completed = operation.completed_at
+        if status in (OperationStatus.COMPLETED, OperationStatus.COMPLETED_WITH_ERRORS):
+            completed = completed or self._now()
+        if operation.status is status and operation.completed_at == completed:
+            return operation
+        stored = replace(operation, status=status, completed_at=completed, updated_at=self._now())
+        await conn.execute(update(admin_notification_operations).where(
+            admin_notification_operations.c.operation_id == str(operation.operation_id)
+        ).values(status=status.value, completed_at=completed, updated_at=stored.updated_at))
+        await self._insert_audit(conn, operation.operation_id, NotificationAuditEvent(
+            audit_id=uuid4(), operation_id=operation.operation_id, event_type="delivery_aggregate_updated",
+            staff_id=None, details={"status": status.value}, created_at=stored.updated_at))
+        return stored
+
+    async def refresh_delivery_aggregate(self, service_id, operation_id):
+        async with self._engine.begin() as conn:
+            operation = await self._require_operation(conn, service_id, operation_id, lock=True)
+            # Repair pre-migration permanent failures without another submission.
+            rows = (await conn.execute(select(admin_notification_outbox).where(
+                admin_notification_outbox.c.operation_id == str(operation_id),
+                admin_notification_outbox.c.state == NotificationOutboxState.PERMANENT_FAILURE.value
+            ))).mappings().all()
+            for row in rows:
+                await self._fail_submission(conn, row)
+            return await self._aggregate(conn, operation)
+
+    async def reconcile_outbox_result(self, service_id, operation_id, outbox_id, delivery):
+        async with self._engine.begin() as conn:
+            operation = await self._require_operation(conn, service_id, operation_id, lock=True)
+            row = (await conn.execute(select(admin_notification_outbox).where(
+                admin_notification_outbox.c.operation_id == str(operation_id),
+                admin_notification_outbox.c.outbox_id == str(outbox_id)
+            ).with_for_update())).mappings().first()
+            if row is None:
+                raise RepositoryStateError("notification outbox record was not found")
+            if row["state"] != NotificationOutboxState.ACCEPTED.value:
+                return operation
+            if delivery.status is DeliveryStatus.PENDING:
+                return operation
+            current = (await conn.execute(select(admin_notification_deliveries).where(
+                admin_notification_deliveries.c.operation_id == str(operation_id),
+                admin_notification_deliveries.c.member_id == row["external_member_id"],
+                admin_notification_deliveries.c.delivery_id == str(delivery.delivery_id)
+            ))).mappings().one()
+            if current["status"] == DeliveryStatus.PENDING.value:
+                values = self._delivery_values(replace(delivery, updated_at=self._now()), current["sequence"])
+                await conn.execute(update(admin_notification_deliveries).where(
+                    admin_notification_deliveries.c.delivery_id == current["delivery_id"]
+                ).values(**values))
+            await conn.execute(update(admin_notification_outbox).where(
+                admin_notification_outbox.c.outbox_id == str(outbox_id)
+            ).values(state=NotificationOutboxState.RECONCILED.value, lease_expires_at=None, claim_token=None))
+            return await self._aggregate(conn, operation)
+
+    async def list_recovery_operations(self, service_id, *, after=None, limit=50):
+        op = admin_notification_operations.c
+        outbox = admin_notification_outbox.c
+        active = select(outbox.outbox_id).where(outbox.operation_id == op.operation_id,
+            outbox.state.not_in((NotificationOutboxState.RECONCILED.value,
+                                NotificationOutboxState.PERMANENT_FAILURE.value))).exists()
+        stmt = select(admin_notification_operations).where(
+            op.service_id == service_id, op.send_requested_at.is_not(None),
+            op.status != OperationStatus.CANCELLED.value,
+            or_(active, op.completed_at.is_(None)))
+        if after is not None:
+            stmt = stmt.where(op.operation_id > str(after))
+        async with self._engine.connect() as conn:
+            rows = (await conn.execute(stmt.order_by(op.operation_id).limit(limit))).mappings().all()
+        return tuple(self._operation(row) for row in rows)
 
     async def rollback_send_attempt(self, service_id, operation_id, delivery_ids):
         expected = tuple(delivery_ids)
         async with self._engine.begin() as conn:
             operation = await self._require_operation(conn, service_id, operation_id, lock=True)
+            has_outbox = (await conn.execute(select(admin_notification_outbox.c.outbox_id).where(
+                admin_notification_outbox.c.operation_id == str(operation_id)).limit(1))).first()
+            if has_outbox:
+                raise ReservedNotificationMutationError("durable outbox reservation cannot be rolled back")
             rows = (await conn.execute(select(admin_notification_deliveries).where(admin_notification_deliveries.c.operation_id == str(operation_id)).order_by(admin_notification_deliveries.c.sequence))).mappings().all()
             if tuple(UUID(row["delivery_id"]) for row in rows) != expected:
                 raise RepositoryStateError("send attempt changed before rollback")

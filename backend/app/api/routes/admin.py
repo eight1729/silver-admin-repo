@@ -77,6 +77,9 @@ async def get_line_send_mode(
 
 
 def _translate(exc: Exception) -> None:
+    from app.domain.errors.admin_notification_repository import ReservedNotificationMutationError
+    if isinstance(exc, ReservedNotificationMutationError):
+        raise HTTPException(status_code=409, detail={"error": "operation_conflict"})
     exc = normalize_admin_exception(exc)
     if isinstance(exc, AdminExternalSystemUnavailableError):
         raise HTTPException(

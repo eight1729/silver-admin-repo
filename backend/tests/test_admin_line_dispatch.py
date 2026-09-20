@@ -48,13 +48,17 @@ class Repo:
             if self.item.state not in (NotificationOutboxState.PENDING, NotificationOutboxState.RETRYABLE_FAILURE): return ()
             self.item = replace(self.item, state=NotificationOutboxState.DELIVERING)
             return (self.item,)
-    async def update_outbox_state(self, service_id, operation_id, outbox_id, state):
+    async def update_outbox_state(self, service_id, operation_id, outbox_id, state, *, claim_token=None):
         self.item = replace(self.item, state=state); return self.item
     async def get_outbox_records(self, service_id, operation_id): return (self.item,)
     async def get_deliveries(self, service_id, operation_id): return (self.delivery,)
     async def update_delivery(self, service_id, operation_id, delivery_id, delivery): self.delivery = delivery; return delivery
     async def get_operation(self, service_id, operation_id): return self.operation
     async def update_operation(self, service_id, operation_id, operation): self.operation = operation; return operation
+    async def reconcile_outbox_result(self, service_id, operation_id, outbox_id, delivery):
+        self.delivery = delivery
+        self.item = replace(self.item, state=NotificationOutboxState.RECONCILED)
+    async def refresh_delivery_aggregate(self, service_id, operation_id): return self.operation
 
 
 class Client:
@@ -142,5 +146,5 @@ async def test_provider_unknown_never_resubmits_command():
     client=Client([result]); reconciler=AdminLineResultReconciler(repository=repo, line_client=client)
     await reconciler.reconcile_operation(service_id="svc", operation_id=item.operation_id)
     assert repo.delivery.status is DeliveryStatus.UNKNOWN
-    assert repo.item.state is NotificationOutboxState.ACCEPTED
+    assert repo.item.state is NotificationOutboxState.RECONCILED
     assert client.submit_calls == 0

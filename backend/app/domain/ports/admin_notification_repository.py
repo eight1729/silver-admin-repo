@@ -65,6 +65,7 @@ class AdminNotificationRepository(Protocol):
         event: NotificationAuditEvent,
         *,
         send_requested_at: datetime,
+        expected_operation: NotificationOperationRecord | None = None,
     ) -> tuple[
         NotificationOperationRecord, tuple[NotificationDeliveryRecord, ...]
     ]: ...
@@ -83,7 +84,14 @@ class AdminNotificationRepository(Protocol):
         operation_id: UUID,
         outbox_id: UUID,
         state,
+        *, claim_token: UUID | None = None,
     ) -> NotificationOutboxRecord: ...
+
+    async def reconcile_outbox_result(self, service_id, operation_id, outbox_id, delivery): ...
+
+    async def refresh_delivery_aggregate(self, service_id, operation_id): ...
+
+    async def list_recovery_operations(self, service_id, *, after=None, limit=50): ...
 
     async def rollback_send_attempt(
         self,

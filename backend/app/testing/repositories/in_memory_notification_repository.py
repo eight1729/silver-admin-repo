@@ -16,6 +16,7 @@ from app.domain.errors.admin_notification_repository import (
     OperationAlreadyExistsError,
     OperationNotFoundError,
     RepositoryStateError,
+    ReservedNotificationMutationError,
     SendAttemptAlreadyExistsError,
     ServiceScopeViolationError,
 )
@@ -347,6 +348,7 @@ class InMemoryNotificationRepository:
         event: NotificationAuditEvent,
         *,
         send_requested_at: datetime,
+        expected_operation: NotificationOperationRecord | None = None,
     ) -> tuple[NotificationOperationRecord, tuple[NotificationDeliveryRecord, ...]]:
         """Atomically reserve one operation send and add its deliveries."""
         with self._lock:
@@ -355,6 +357,8 @@ class InMemoryNotificationRepository:
                 raise SendAttemptAlreadyExistsError(
                     "notification operation already has a send attempt"
                 )
+            if expected_operation is not None and operation != expected_operation:
+                raise ReservedNotificationMutationError("operation changed before send reservation")
             pending: list[NotificationDeliveryRecord] = []
             outbox = tuple(outbox_records)
             seen: set[UUID] = set()

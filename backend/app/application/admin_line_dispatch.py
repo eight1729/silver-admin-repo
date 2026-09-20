@@ -1,20 +1,23 @@
 """Admin Outbox dispatch and business-result reconciliation via LINE API."""
 
 from dataclasses import replace
+import asyncio
+import logging
 from uuid import UUID
 
 from app.adapter.line_internal_api import (
     LineInternalApiPermanentError,
     LineInternalApiRetryableError,
 )
-from app.domain.enums.enums import DeliveryStatus, OperationStatus
+from app.domain.enums.enums import DeliveryStatus
 from app.domain.models.admin_notification import NotificationOutboxState
 from app.contracts.admin_line_internal_v1 import (
     BusinessNotificationMessage,
     NotificationCommand,
-    NotificationCommandStatus,
     ServiceOrganizationScope,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AdminLineOutboxDispatcher:
@@ -28,17 +31,17 @@ class AdminLineOutboxDispatcher:
         )
         for item in claimed:
             try:
-                await self._line_client.submit_notification_command(
+                await asyncio.wait_for(self._line_client.submit_notification_command(
                     self._command(item)
-                )
-            except LineInternalApiRetryableError:
+                ), timeout=30)
+            except (LineInternalApiRetryableError, asyncio.TimeoutError):
                 state = NotificationOutboxState.RETRYABLE_FAILURE
             except LineInternalApiPermanentError:
                 state = NotificationOutboxState.PERMANENT_FAILURE
             else:
                 state = NotificationOutboxState.ACCEPTED
             await self._repository.update_outbox_state(
-                service_id, operation_id, item.outbox_id, state
+                service_id, operation_id, item.outbox_id, state, claim_token=item.claim_token
             )
 
     @staticmethod
@@ -71,6 +74,7 @@ class AdminLineResultReconciler:
     def __init__(self, *, repository, line_client) -> None:
         self._repository = repository
         self._line_client = line_client
+        self._cursors = {}
 
     async def reconcile_operation(self, *, service_id: str, operation_id: UUID):
         outbox = await self._repository.get_outbox_records(service_id, operation_id)
@@ -78,35 +82,36 @@ class AdminLineResultReconciler:
             item for item in outbox
             if item.state is NotificationOutboxState.ACCEPTED
         )
+        cursor = self._cursors.get(operation_id, "")
+        accepted = tuple(sorted(accepted, key=lambda item: str(item.outbox_id)))
+        page = tuple(item for item in accepted if str(item.outbox_id) > cursor)[:50]
+        if not page:
+            page = accepted[:50]
+        if page:
+            self._cursors[operation_id] = str(page[-1].outbox_id)
+        else:
+            self._cursors.pop(operation_id, None)
         deliveries = list(
             await self._repository.get_deliveries(service_id, operation_id)
         )
         by_member = {item.member_id: item for item in deliveries}
-        for item in accepted:
-            result = await self._line_client.get_notification_result(item.command_id)
+        for item in page:
+            try:
+                result = await asyncio.wait_for(self._line_client.get_notification_result(item.command_id), timeout=30)
+            except Exception as error:
+                logger.warning("Admin result polling failed: %s", type(error).__name__)
+                continue
             delivery = by_member.get(item.external_member_id)
             if delivery is None:
                 continue
             projected = self._project(delivery, result)
-            if projected != delivery:
-                stored = await self._repository.update_delivery(
-                    service_id, operation_id, delivery.delivery_id, projected
-                )
-                by_member[stored.member_id] = stored
+            if getattr(result.status, "value", result.status) not in ("accepted", "pending"):
+                await self._repository.reconcile_outbox_result(
+                    service_id, operation_id, item.outbox_id, projected)
 
-        current = tuple(by_member.values())
-        operation = await self._repository.get_operation(service_id, operation_id)
-        pending = any(item.status is DeliveryStatus.PENDING for item in current)
-        if pending:
-            status = OperationStatus.SENDING
-        elif any(item.status in (DeliveryStatus.FAILED, DeliveryStatus.UNKNOWN, DeliveryStatus.SKIPPED) for item in current):
-            status = OperationStatus.COMPLETED_WITH_ERRORS
-        else:
-            status = OperationStatus.COMPLETED
-        if operation.status is not status:
-            operation = await self._repository.update_operation(
-                service_id, operation_id, replace(operation, status=status)
-            )
+        operation = await self._repository.refresh_delivery_aggregate(service_id, operation_id)
+        if getattr(operation, "completed_at", None) is not None:
+            self._cursors.pop(operation_id, None)
         return operation
 
     @staticmethod

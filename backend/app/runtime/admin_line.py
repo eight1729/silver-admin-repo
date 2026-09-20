@@ -10,6 +10,7 @@ from app.application.admin_line_dispatch import (
     AdminLineOutboxDispatcher,
     AdminLineResultReconciler,
 )
+from app.application.admin_notification_runner import AdminNotificationRunner
 from app.application.admin_service import AdminApplicationService
 from app.application.notification_service import NotificationService
 from app.core.settings_admin import AdminSettings, admin_settings
@@ -21,12 +22,13 @@ from app.domain.ports.organization_service_scope import (
 )
 
 
-@dataclass(frozen=True)
+@dataclass
 class AdminLineRuntime:
     client: HttpLineInternalApiClient
     repository: SqlAlchemyAdminNotificationRepository
     dispatcher: AdminLineOutboxDispatcher
     reconciler: AdminLineResultReconciler
+    runner: AdminNotificationRunner | None = None
 
 
 def build_admin_line_runtime(
@@ -62,6 +64,7 @@ def build_production_admin_application(
     queue_gateway,
     service_id: str | None = None,
     organization_id: str | None = None,
+    runner_service_ids,
     scope_resolver: OrganizationServiceScopeResolver | None = None,
     engine: AsyncEngine | None = None,
     client: httpx.AsyncClient | None = None,
@@ -79,6 +82,13 @@ def build_production_admin_application(
         if service_id is None or organization_id is None:
             raise RuntimeError("Admin business scope resolver is required")
         scope_resolver = ConfiguredOrganizationServiceScopeResolver({service_id: organization_id})
+
+    boundary.runner = AdminNotificationRunner(
+        repository=boundary.repository,
+        dispatcher=boundary.dispatcher,
+        reconciler=boundary.reconciler,
+        service_ids=runner_service_ids,
+    )
 
     def organization(requested_service: str) -> str:
         return scope_resolver.resolve(requested_service).organization_id

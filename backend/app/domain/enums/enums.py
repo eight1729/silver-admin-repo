@@ -38,6 +38,12 @@ class JobStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
+class MemberVerificationStatus(str, Enum):
+    NO_MATCH = "no_match"
+    UNIQUE_MATCH = "unique_match"
+    MULTIPLE_MATCH = "multiple_match"
+
+
 class LinkEligibilityReason(str, Enum):
     MEMBER_NOT_FOUND = "member_not_found"
     MEMBER_INACTIVE = "member_inactive"

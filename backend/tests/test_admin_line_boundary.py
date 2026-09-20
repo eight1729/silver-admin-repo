@@ -32,6 +32,7 @@ def test_production_admin_composition_has_only_internal_api_line_boundary():
         external_business_gateway=SimpleNamespace(),
         queue_gateway=queue,
         service_id="svc",
+        runner_service_ids=("svc",),
         organization_id="org",
         engine=object(),
         client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request: None)),

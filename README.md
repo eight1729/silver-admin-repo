@@ -62,7 +62,7 @@ Admin と LINE の境界は、原則として次の2点です。
 
 会員、求人、推薦・マッチング等の業務情報については、外部業務システム側を正本とする設計です。
 
-Admin Repository では External Business System との接続を境界として分離しており、ローカル・検証用として Scoped Fake External Business 実装を含みます。
+Admin Repository では External Business System との接続を `ExternalBusinessGateway` 境界として分離しています。標準 runtime は設定済みの Current DB Adapter を使用し、runtime Fake や fixture を自動選択しません。Current DB Adapter は release 前の検証用実装であり、外部業務システムの本番仕様を表すものではありません。
 
 実際の外部業務システムとの接続方法は、API、DB 接続その他の方式を含め、接続先の仕様に応じてこの境界の内側で実装する想定です。
 
@@ -134,11 +134,13 @@ Admin Backend の canonical entrypoint は次のファイルです。
 backend/app/main_admin.py
 ```
 
+コンテナ起動も `uvicorn app.main_admin:app` を使用します。
+
 ローカル起動手順は [docs/LOCAL_RUN.md](docs/LOCAL_RUN.md) を参照してください。
 
 ## API 契約
 
-Admin Repository には、Admin 自身の API 契約に加えて、LINE Repository が提供する内部 API の配布済み契約を保持します。
+Admin Repository には、Admin 自身の API 契約に加えて、LINE Repository が提供する内部 API の配布済み契約を保持します。Admin Internal API の provider owner は Admin、LINE Internal API の provider owner は LINE です。契約は共有 Python package ではなく、versioned OpenAPI artifact を手動配布します。
 
 ```text
 backend/contracts/admin-api-v1.openapi.json
@@ -172,3 +174,4 @@ RIGHTS.md
 ```
 
 正式な契約書が別途締結されている場合は、その契約内容が優先されます。
+Notification runner ownership is configured separately with `ADMIN_NOTIFICATION_RUNNER_SERVICE_IDS`. `ADMIN_INTERNAL_API_SCOPES` remains an inbound API authorization map.

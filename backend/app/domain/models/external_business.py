@@ -1,7 +1,34 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from app.domain.enums.enums import JobStatus, LinkEligibilityReason
+from app.domain.enums.enums import JobStatus, LinkEligibilityReason, MemberVerificationStatus
+
+
+@dataclass(frozen=True, slots=True)
+class MemberVerificationInput:
+    member_number: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class MemberVerificationResult:
+    status: MemberVerificationStatus
+    external_member_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, MemberVerificationStatus):
+            raise ValueError("status must be a MemberVerificationStatus")
+        if self.status is MemberVerificationStatus.UNIQUE_MATCH:
+            if not isinstance(self.external_member_id, str) or not self.external_member_id:
+                raise ValueError("unique match requires an external_member_id")
+        elif self.external_member_id is not None:
+            raise ValueError("only unique match may contain an external_member_id")
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalMemberSummary:
+    external_member_id: str
+    display_label: str | None
 
 
 @dataclass(frozen=True, slots=True)

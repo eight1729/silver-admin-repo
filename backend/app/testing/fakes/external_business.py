@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.domain.models.external_business import (
+    ExternalMemberSummary, MemberVerificationInput, MemberVerificationResult,
+)
+from app.domain.models.external_business import (
     CandidateMember,
     ExternalJobDetail,
     ExternalJobSummary,
@@ -80,6 +83,16 @@ class FakeExternalBusinessGateway:
             raise exc
         if self.persistent_error is not None:
             raise self.persistent_error
+
+    async def verify_member(
+        self, *, external_organization_id: str, verification: MemberVerificationInput,
+    ) -> MemberVerificationResult:
+        raise ExternalBusinessNotConfiguredError("member verification is not configured")
+
+    async def get_member_summary(
+        self, *, external_organization_id: str, external_member_id: str,
+    ) -> ExternalMemberSummary:
+        raise ExternalBusinessNotConfiguredError("member summary is not configured")
 
     async def check_link_eligibility(
         self,

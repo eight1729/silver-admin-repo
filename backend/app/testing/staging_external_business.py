@@ -2,6 +2,10 @@
 
 from dataclasses import replace
 
+from app.domain.models.external_business import (
+    ExternalMemberSummary, MemberVerificationInput, MemberVerificationResult,
+)
+from app.domain.errors.errors import ExternalBusinessNotConfiguredError
 from app.domain.models.external_business import JobSearchQuery
 from app.domain.ports.external_business import ExternalBusinessGateway
 from app.testing.repositories.staging_liff_links import (
@@ -30,6 +34,16 @@ class StagingExternalBusinessGateway:
     @staticmethod
     def _to_staging_member(member_id: str) -> str:
         return STAGING_MEMBER_ID if member_id == _FIXTURE_MEMBER_ID else member_id
+
+    async def verify_member(
+        self, *, external_organization_id: str, verification: MemberVerificationInput,
+    ) -> MemberVerificationResult:
+        raise ExternalBusinessNotConfiguredError("member verification is not configured")
+
+    async def get_member_summary(
+        self, *, external_organization_id: str, external_member_id: str,
+    ) -> ExternalMemberSummary:
+        raise ExternalBusinessNotConfiguredError("member summary is not configured")
 
     async def check_link_eligibility(
         self, *, external_organization_id, external_member_id

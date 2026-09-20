@@ -35,3 +35,7 @@ class ServiceScopeViolationError(NotificationRepositoryError):
 
 class RepositoryStateError(NotificationRepositoryError):
     pass
+
+
+class ReservedNotificationMutationError(RepositoryStateError):
+    """A concurrent send reservation froze the editable notification."""

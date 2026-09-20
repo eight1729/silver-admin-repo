@@ -130,6 +130,7 @@ class NotificationOutboxState(str, Enum):
     ACCEPTED = "accepted"
     RETRYABLE_FAILURE = "retryable_failure"
     PERMANENT_FAILURE = "permanent_failure"
+    RECONCILED = "reconciled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,3 +154,5 @@ class NotificationOutboxRecord:
     requested_at: datetime
     created_at: datetime
     state: NotificationOutboxState = NotificationOutboxState.PENDING
+    lease_expires_at: datetime | None = None
+    claim_token: UUID | None = None

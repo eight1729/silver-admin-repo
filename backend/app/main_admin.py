@@ -3,6 +3,7 @@ from fastapi import APIRouter, FastAPI
 from app.app_factory import configure_shared_infrastructure, shared_lifespan
 from app.api.admin_entry_deps import get_admin_application_service
 from app.api.routes.admin import router as admin_router
+from app.api.routes.admin_internal import router as admin_internal_router
 from app.api.admin_auth import get_admin_runtime_settings
 from app.core.settings_admin import AdminSettings, admin_settings
 from app.db.engine import configure_database_url
@@ -19,6 +20,7 @@ def create_admin_app(
     runtime_settings: AdminSettings = admin_settings,
     *,
     admin_service_provider=None,
+    external_business_gateway=None,
 ) -> FastAPI:
     configure_database_url(runtime_settings.database_url)
     environment = runtime_settings.app_env.strip().lower()
@@ -36,8 +38,11 @@ def create_admin_app(
         additional_allowed_headers=("X-Service-ID",),
     )
     app.state.admin_runtime_settings = runtime_settings
+    app.state.admin_internal_business_gateway = external_business_gateway
     app.include_router(_health_router())
     app.include_router(admin_router)
+    # Distributed separately as the Admin-owned internal contract artifact.
+    app.include_router(admin_internal_router, include_in_schema=False)
     if admin_service_provider is not None:
         app.dependency_overrides[get_admin_application_service] = admin_service_provider
     elif runtime_settings.admin_local_integration_mode:
@@ -55,6 +60,29 @@ def create_admin_app(
 
         app.dependency_overrides[get_admin_application_service] = (
             get_local_admin_application_service
+        )
+    elif external_business_gateway is None and runtime_settings.notification_runner_service_ids:
+        # Canonical production-shaped composition. Runner ownership is a
+        # dedicated setting, separate from Internal API authorization scopes.
+        from app.runtime.admin_local_integration import build_admin_composition
+
+        missing_scopes = set(runtime_settings.notification_runner_service_ids) - set(runtime_settings.admin_internal_api_scopes)
+        if missing_scopes:
+            raise RuntimeError("notification runner service scope is not configured")
+        composition = build_admin_composition(
+            runtime_settings=runtime_settings,
+            scopes={service_id: runtime_settings.admin_internal_api_scopes[service_id]
+                    for service_id in runtime_settings.notification_runner_service_ids
+                    if service_id in runtime_settings.admin_internal_api_scopes},
+            runner_service_ids=runtime_settings.notification_runner_service_ids,
+        )
+        app.state.admin_runtime_composition = composition
+
+        def get_runtime_admin_application_service():
+            return composition.application
+
+        app.dependency_overrides[get_admin_application_service] = (
+            get_runtime_admin_application_service
         )
     app.dependency_overrides[get_admin_runtime_settings] = lambda: runtime_settings
     return app

@@ -64,6 +64,7 @@ def test_admin_provisioning_is_exact_ordered_and_checkfirst(monkeypatch):
         calls.append((self.name, connection, checkfirst))
 
     monkeypatch.setattr(Table, "create", record_create)
+    monkeypatch.setattr("app.db.admin_notification_provisioning.migrate_admin_outbox_recovery", lambda connection: None)
     connection = object()
     names = create_admin_notification_tables(connection)
     assert names == EXPECTED_TABLES

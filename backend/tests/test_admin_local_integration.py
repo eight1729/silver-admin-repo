@@ -31,7 +31,9 @@ from app.runtime.admin_local_integration import (
     build_local_integration_admin_composition,
 )
 from app.testing.fakes.external_business import FakeExternalBusinessGateway
-from app.testing.local_integration import ScopedFakeExternalBusinessGateway
+from app.testing.local_integration import build_local_integration_external_business
+from app.adapter.current_db_external_business import CurrentDbExternalBusinessGateway
+from app.domain.errors.errors import ExternalBusinessNotConfiguredError
 from app.domain.ports.organization_service_scope import (
     OrganizationServiceScopeNotConfiguredError,
 )
@@ -51,6 +53,7 @@ def _settings(*, environment="local", enabled=True, scopes=None):
         database_url="postgresql+asyncpg://unused/unused",
         app_env=environment,
         admin_local_integration_mode=enabled,
+        admin_notification_runner_service_ids="service-a,service-b" if enabled else "",
         admin_local_integration_scopes=(
             {"service-a": "organization-a", "service-b": "organization-b"}
             if scopes is None and enabled
@@ -58,6 +61,7 @@ def _settings(*, environment="local", enabled=True, scopes=None):
         ),
         admin_line_internal_api_base_url="http://line.internal",
         admin_line_internal_api_bearer_token=SecretStr("test-only"),
+        current_db_business_centers={"organization-a": "center-a", "organization-b": "center-b"},
     )
 
 
@@ -155,7 +159,7 @@ def test_local_integration_uses_phase4_persistent_http_composition():
     assert queue._handler is composition.dispatch
 
 
-def test_default_local_integration_builds_only_allowed_fakes():
+def test_default_local_integration_builds_current_db_without_fake():
     composition = build_local_integration_admin_composition(
         runtime_settings=_settings(),
         engine=object(),
@@ -165,10 +169,18 @@ def test_default_local_integration_builds_only_allowed_fakes():
             )
         ),
     )
-    assert isinstance(composition.external_business, ScopedFakeExternalBusinessGateway)
+    assert isinstance(composition.external_business, CurrentDbExternalBusinessGateway)
     assert isinstance(composition.queue, LocalInlineNotificationQueue)
     assert composition.application.notification_service._line_sender is None
     assert not hasattr(composition.boundary, "line_sender")
+
+
+def test_default_local_integration_missing_centers_fails_without_fixture_fallback():
+    settings = _settings().model_copy(update={"current_db_business_centers": {}})
+    with pytest.raises(ExternalBusinessNotConfiguredError):
+        build_local_integration_admin_composition(
+            runtime_settings=settings, engine=object(), client=object(),
+        )
 
 
 def test_admin_app_switches_dependency_only_when_integration_is_enabled(monkeypatch):
@@ -286,6 +298,9 @@ def test_scope_resolver_rejects_missing_or_noncanonical_identifiers(mapping):
 async def test_two_services_use_isolated_external_business_organizations():
     composition = build_local_integration_admin_composition(
         runtime_settings=_settings(),
+        external_business=build_local_integration_external_business(
+            ConfiguredOrganizationServiceScopeResolver(_settings().admin_local_integration_scopes).scopes
+        ),
         engine=object(),
         client=httpx.AsyncClient(
             transport=httpx.MockTransport(

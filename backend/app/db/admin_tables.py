@@ -90,6 +90,8 @@ admin_notification_outbox = Table(
     Column("requested_at", DateTime(timezone=True), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("state", Text, nullable=False),
+    Column("lease_expires_at", DateTime(timezone=True)),
+    Column("claim_token", Text),
     UniqueConstraint("operation_id", "target_id", name="uq_admin_outbox_operation_target"),
     Index("idx_admin_outbox_state_created", "state", "created_at"),
 )

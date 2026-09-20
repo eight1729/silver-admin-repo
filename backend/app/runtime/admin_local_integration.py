@@ -33,18 +33,33 @@ def build_local_integration_admin_composition(
         raise RuntimeError("Admin local integration mode requires APP_ENV=local")
     if not runtime_settings.admin_local_integration_mode:
         raise RuntimeError("Admin local integration mode is not enabled")
+    return build_admin_composition(
+        runtime_settings=runtime_settings,
+        scopes=runtime_settings.admin_local_integration_scopes,
+        runner_service_ids=runtime_settings.notification_runner_service_ids,
+        engine=engine, client=client, external_business=external_business, queue=queue,
+    )
+
+
+def build_admin_composition(*, runtime_settings, scopes, runner_service_ids, engine=None, client=None,
+                            external_business=None, queue=None) -> LocalIntegrationAdminComposition:
+
+    if not scopes or not runner_service_ids or set(runner_service_ids) - set(scopes):
+        raise RuntimeError("notification runner service scope is not configured")
 
     from app.adapter.admin_scope import ConfiguredOrganizationServiceScopeResolver
 
     scope_resolver = ConfiguredOrganizationServiceScopeResolver(
-        runtime_settings.admin_local_integration_scopes
+        scopes
     )
 
     if external_business is None:
-        from app.testing.local_integration import build_local_integration_external_business
+        from app.adapter.current_db_external_business import CurrentDbExternalBusinessGateway
+        from app.db.engine import get_engine
 
-        external_business = build_local_integration_external_business(
-            scope_resolver.scopes
+        external_business = CurrentDbExternalBusinessGateway(
+            engine if engine is not None else get_engine(),
+            runtime_settings.current_db_business_centers,
         )
     if queue is None:
         queue = LocalInlineNotificationQueue()
@@ -56,6 +71,7 @@ def build_local_integration_admin_composition(
         engine=engine,
         client=client,
         runtime_settings=runtime_settings,
+        runner_service_ids=runner_service_ids,
     )
     return LocalIntegrationAdminComposition(
         application=application,

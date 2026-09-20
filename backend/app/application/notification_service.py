@@ -46,6 +46,7 @@ from app.domain.models.admin_notification import (
     NotificationOperationRecord,
     NotificationOutboxRecord,
     NotificationTargetRecord,
+    freeze_mapping,
 )
 from app.domain.ports.admin_notification_repository import (
     AdminNotificationRepository,
@@ -382,7 +383,7 @@ class NotificationService:
 
     @staticmethod
     def _ensure_editable(operation: NotificationOperationRecord) -> None:
-        if operation.status not in _EDITABLE_STATUSES:
+        if operation.send_requested_at is not None or operation.status not in _EDITABLE_STATUSES:
             raise OperationNotEditableError("notification operation is not editable")
 
     def _audit_event(
@@ -983,6 +984,10 @@ class NotificationService:
         )
 
         # 4. Reject if validation did not clear the operation for sending
+        if (operation.status is not OperationStatus.READY
+                or operation.validated_at != summary.validated_at
+                or operation.validation_snapshot != freeze_mapping(_validation_snapshot(summary))):
+            raise OperationNotSendableError("operation changed after validation")
         if not summary.can_proceed or summary.requires_staff_reconfirmation:
             now = self._now()
             reason = (
@@ -1149,6 +1154,7 @@ class NotificationService:
                     now,
                 ),
                 send_requested_at=now,
+                expected_operation=operation,
             )
         except SendAttemptAlreadyExistsError as exc:
             await self._audit(

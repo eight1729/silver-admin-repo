@@ -2,6 +2,10 @@
 
 from pathlib import Path
 
+from app.domain.models.external_business import (
+    ExternalMemberSummary, MemberVerificationInput, MemberVerificationResult,
+)
+from app.domain.errors.errors import ExternalBusinessNotConfiguredError
 from app.domain.models.external_business import PagedExternalJobs
 from app.testing.fakes.external_business import FakeExternalBusinessGateway
 from app.testing.fixtures.loader import apply_to_fake, load_external_business_scenario
@@ -55,6 +59,16 @@ class ScopedFakeExternalBusinessGateway:
             raise NotConfiguredError(
                 "External Business organization scope is not configured"
             ) from error
+
+    async def verify_member(
+        self, *, external_organization_id: str, verification: MemberVerificationInput,
+    ) -> MemberVerificationResult:
+        raise ExternalBusinessNotConfiguredError("member verification is not configured")
+
+    async def get_member_summary(
+        self, *, external_organization_id: str, external_member_id: str,
+    ) -> ExternalMemberSummary:
+        raise ExternalBusinessNotConfiguredError("member summary is not configured")
 
     async def check_link_eligibility(self, *, external_organization_id, external_member_id):
         return await self._gateway(external_organization_id).check_link_eligibility(

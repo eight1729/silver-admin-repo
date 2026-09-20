@@ -4,6 +4,9 @@ from app.domain.models.external_business import (
     CandidateMember,
     ExternalJobDetail,
     ExternalJobSummary,
+    ExternalMemberSummary,
+    MemberVerificationInput,
+    MemberVerificationResult,
     JobSearchQuery,
     LinkEligibility,
     PagedExternalJobs,
@@ -24,7 +27,7 @@ class ExternalBusinessGateway(Protocol):
     渡す箇所は移行対象であり、両 ID が同義であることを契約しない。
 
     責務:
-    - 外部APIとの通信
+    - 外部業務システムへのアクセス（DB / API 等の接続方式は Adapter の責務）
     - 外部レスポンスから内部モデルへの変換
     - 外部エラーから Domain 例外への変換
 
@@ -35,6 +38,33 @@ class ExternalBusinessGateway(Protocol):
     - LINE 送信
     - HTTP レスポンス生成
     """
+
+    async def verify_member(
+        self,
+        *,
+        external_organization_id: str,
+        verification: MemberVerificationInput,
+    ) -> MemberVerificationResult:
+        """Match member_number + name without normalization or fuzzy matching.
+
+        Only a unique match returns the stable external member ID. Provider
+        failures raise ExternalBusinessError; they are never match outcomes.
+        This verifies identity, independently of link eligibility.
+        """
+        ...
+
+    async def get_member_summary(
+        self,
+        *,
+        external_organization_id: str,
+        external_member_id: str,
+    ) -> ExternalMemberSummary:
+        """Return the minimal display projection for the requested member ID.
+
+        Raise ExternalMemberNotFoundError if absent; other provider failures
+        raise ExternalBusinessError (e.g. ExternalSystemUnavailableError).
+        """
+        ...
 
     async def check_link_eligibility(
         self,

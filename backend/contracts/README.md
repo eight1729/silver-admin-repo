@@ -31,3 +31,36 @@ python scripts/export_application_openapi.py all
 The Admin LINE-internal client consumes the distributable models in
 `app/contracts/admin_line_internal_v1.py`; production Admin code does not
 import the LINE provider's private schema module.
+
+## Admin internal business API (Slice 1.2)
+
+`admin-internal-api-v1.openapi.json` is owned by the **Admin Repository**, which
+is the source of truth for the LINE-to-Admin business contract. LINE consumers
+use this checked-in artifact without importing Admin Python source. Admin does
+not import LINE provider Python source. Do not silently change request/response
+semantics: breaking changes require a new major version/path or an explicit
+consumer migration; additive compatible changes update the contract version.
+
+Generate the dedicated artifact from `backend` without reading any `.env`:
+
+```text
+python scripts/export_admin_internal_openapi.py
+```
+
+The exporter uses the same router and schemas as the Admin runtime. The internal
+router is deliberately excluded from the public Admin OpenAPI document; its
+dedicated artifact includes the four operations, schemas, errors, Bearer security
+scheme and version `1.0.0`. Its version is independent of the opposite-direction
+LINE internal contract. Focused tests compare the artifact with runtime schemas.
+
+See [External Business Integration Requirements](../../docs/EXTERNAL_BUSINESS_INTEGRATION.md)
+for business semantics, configuration and the runtime boundary.
+
+## Contract ownership and distribution
+
+Admin Internal API v1 and Admin Staff API v1 are owned by this repository.
+`admin-internal-api-v1.openapi.json` is consumed by the LINE repository; the
+Admin Staff API is consumed by the Admin Frontend. LINE Internal API v1 is owned
+by the LINE repository and consumed here. Generate provider artifacts, copy the
+versioned file to the consumer, compare bytes or hashes, and run compatibility
+tests. No shared Python contract package is used.
