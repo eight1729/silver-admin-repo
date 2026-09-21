@@ -809,3 +809,127 @@ def test_a_base_url_with_whitespace_fails_at_configuration_time(value):
     # in configuration would surface much later as an apparent outage.
     with pytest.raises(ExternalBusinessNotConfiguredError):
         HttpExternalBusinessGateway(client=httpx.AsyncClient(), base_url=value)
+
+
+# ---------------------------------------------------------------------------
+# Third review round (2026-09-21): the same hazards on the remaining paths
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("call,payload", [
+    ("search_jobs", {"items": [JOB_ITEM, dict(JOB_ITEM, work_time="18:00", version="v2")]}),
+    ("list_recommended_jobs", {"items": [JOB_ITEM, dict(JOB_ITEM, work_time="18:00")]}),
+])
+async def test_a_repeated_job_is_refused_on_every_list(call, payload):
+    # Callers look a job up by ID and take the first match, so a second row with
+    # different hours would build a notification from the stale one.
+    provider, _ = gateway(json_handler(payload))
+    kwargs = ({"query": JobSearchQuery()} if call == "search_jobs"
+              else {"external_member_id": "900001"})
+    with pytest.raises(ExternalSystemUnavailableError):
+        await getattr(provider, call)(external_organization_id=ORG, **kwargs)
+
+
+@pytest.mark.parametrize("members", [
+    # Answered about somebody who was not asked about.
+    [{"external_member_id": "900002", "eligible": True, "reason_code": None}],
+    # Asked about two, answered about one: the missing one would be reported to
+    # an operator as a member that does not exist.
+    [{"external_member_id": "900001", "eligible": True, "reason_code": None}],
+    [],
+])
+async def test_validation_must_answer_exactly_the_members_asked_about(members):
+    provider, _ = gateway(json_handler(dict(VALIDATION, members=members)))
+    with pytest.raises(ExternalSystemUnavailableError):
+        await provider.validate_notification_targets(
+            external_organization_id=ORG, external_job_id="job-1",
+            expected_job_version="v1", external_member_ids=["900001", "900002"],
+        )
+
+
+async def test_validation_accepts_exactly_the_requested_members():
+    provider, _ = gateway(json_handler(dict(VALIDATION, members=[
+        {"external_member_id": "900002", "eligible": False, "reason_code": "member_inactive"},
+        {"external_member_id": "900001", "eligible": True, "reason_code": None},
+    ])))
+    result = await provider.validate_notification_targets(
+        external_organization_id=ORG, external_job_id="job-1",
+        expected_job_version="v1", external_member_ids=["900001", "900002"],
+    )
+    assert {row.external_member_id for row in result.members} == {"900001", "900002"}
+
+
+async def test_only_an_absent_job_may_omit_the_current_version():
+    # A closed job with no version reads downstream as a version change.
+    provider, _ = gateway(json_handler(dict(
+        VALIDATION, job_eligible=False, job_reason_code="job_closed",
+        current_job_version="", members=[],
+    )))
+    with pytest.raises(ExternalSystemUnavailableError):
+        await provider.validate_notification_targets(
+            external_organization_id=ORG, external_job_id="job-1",
+            expected_job_version="v1", external_member_ids=[],
+        )
+
+
+@pytest.mark.parametrize("value", ["https://:443", "https://host\x7fname"])
+def test_a_base_url_without_a_host_or_with_a_control_character_is_refused(value):
+    with pytest.raises(ExternalBusinessNotConfiguredError):
+        HttpExternalBusinessGateway(client=httpx.AsyncClient(), base_url=value)
+
+
+@pytest.mark.parametrize("value", [
+    "https://[2001:db8::1]:8443", "https://host.example:8443/base",
+    "https://xn--eckwd4c7c.example", "https://host.example/a%20b",
+])
+def test_ordinary_urls_are_still_accepted(value):
+    # The whitespace and host checks must not reject IPv6 literals, ports,
+    # punycode, or percent-encoded paths.
+    HttpExternalBusinessGateway(client=httpx.AsyncClient(), base_url=value)
+
+
+@pytest.mark.parametrize("configured,expect_provider", [
+    (None, False), ("", False),
+    # A whitespace-only or padded value is a misconfiguration, not "unset":
+    # silently falling back would switch the data source without saying so.
+    (" ", None), ("  https://business.example.test  ", None),
+])
+def test_a_misconfigured_base_url_fails_instead_of_selecting_another_source(
+    monkeypatch, configured, expect_provider
+):
+    monkeypatch.setattr("app.db.engine.get_engine", lambda: SimpleNamespace(name="engine"))
+    from app.main_admin import create_admin_app
+
+    settings = admin_settings_for(monkeypatch, admin_external_business_base_url=configured)
+    if expect_provider is None:
+        with pytest.raises(ExternalBusinessNotConfiguredError):
+            create_admin_app(settings)
+        return
+    app = create_admin_app(settings)
+    assert (app.state.admin_internal_business_gateway is not None) is expect_provider
+
+
+@pytest.mark.parametrize("version", [None, 123, []])
+async def test_an_absent_job_still_has_to_report_a_string_version(version):
+    # The empty-string allowance is for an absent job, but the value must still
+    # be a string: a number silently becoming "" would hide a contract break,
+    # and only this combination exercises the type check on its own.
+    provider, _ = gateway(json_handler(dict(
+        VALIDATION, job_eligible=False, job_reason_code="job_not_found",
+        current_job_version=version, members=[],
+    )))
+    with pytest.raises(ExternalSystemUnavailableError):
+        await provider.validate_notification_targets(
+            external_organization_id=ORG, external_job_id="job-1",
+            expected_job_version="v1", external_member_ids=[],
+        )
+
+
+async def test_an_absent_job_reports_an_empty_string_version():
+    provider, _ = gateway(json_handler(dict(
+        VALIDATION, job_eligible=False, job_reason_code="job_not_found",
+        current_job_version="", members=[],
+    )))
+    result = await provider.validate_notification_targets(
+        external_organization_id=ORG, external_job_id="job-1",
+        expected_job_version="v1", external_member_ids=[],
+    )
+    assert result.current_job_version == ""

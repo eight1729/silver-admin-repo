@@ -15,8 +15,11 @@ def _external_business_from_settings(runtime_settings: AdminSettings, environmen
     Returning None leaves both the Internal API and the production composition on
     the Current DB Adapter, so behaviour is unchanged until the setting is added.
     """
-    base_url = (runtime_settings.admin_external_business_base_url or "").strip()
-    if not base_url:
+    # ★Do not strip here. Stripping would hide a padded or whitespace-only value
+    #   from the URL check below: "  " would read as "not configured" and quietly
+    #   select a different data source instead of failing at startup.
+    base_url = runtime_settings.admin_external_business_base_url
+    if base_url is None or base_url == "":
         return None
     from app.adapter.external_business_http import HttpExternalBusinessGateway
     from app.services.http_client import get_client

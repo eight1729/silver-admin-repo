@@ -276,7 +276,7 @@ class HttpExternalBusinessGateway:
             json={"external_member_id": external_member_id},
             not_found=ExternalMemberNotFoundError,
         ))
-        return [self._summary(_object(item)) for item in _items(body, "items")]
+        return list(self._unique_jobs(_items(body, "items")))
 
     # -- jobs --------------------------------------------------------------
     async def search_jobs(
@@ -299,7 +299,7 @@ class HttpExternalBusinessGateway:
             "GET", f"/v1/orgs/{_segment(external_organization_id)}/jobs", params=params
         ))
         return PagedExternalJobs(
-            items=tuple(self._summary(_object(item)) for item in _items(body, "items")),
+            items=self._unique_jobs(_items(body, "items")),
             page=_int(body.get("page"), query.page),
             page_size=_int(body.get("page_size"), query.page_size),
             total_count=body.get("total_count") if isinstance(body.get("total_count"), int) else None,
@@ -371,7 +371,9 @@ class HttpExternalBusinessGateway:
                 "external_member_ids": list(external_member_ids),
             },
         ))
-        members = _items(body, "members")
+        members = self._member_validations(
+            _items(body, "members"), external_member_ids
+        )
         job_eligible = _decision_flag(body.get("job_eligible"), "job_eligible")
         job_reason = _eligibility_reason(body.get("job_reason_code"))
         # "Safe to send" carrying a reason is read as neither. Dropping the reason
@@ -383,8 +385,11 @@ class HttpExternalBusinessGateway:
         current_version = body.get("current_job_version")
         if not isinstance(current_version, str):
             raise _unavailable("an invalid current job version")
-        if job_eligible and not current_version:
-            raise _unavailable("an eligible job without a version")
+        # Empty is the absent-job answer specifically, not a blanket allowance for
+        # any ineligible job: a closed or paused job with no version would be read
+        # downstream as a version change.
+        if not current_version and job_reason is not NotificationEligibilityReason.JOB_NOT_FOUND:
+            raise _unavailable("a job without a current version")
         validated_at = _parse_datetime(body.get("validated_at"))
         if validated_at is None:
             raise _unavailable("no validation timestamp")
@@ -393,23 +398,43 @@ class HttpExternalBusinessGateway:
             job_eligible=job_eligible,
             current_job_version=current_version,
             job_reason_code=job_reason,
-            members=self._member_validations(members),
+            members=members,
             validated_at=validated_at,
             external_request_id=_optional_text(body.get("external_request_id")),
         )
 
     # -- mapping -----------------------------------------------------------
     @classmethod
-    def _member_validations(cls, rows: list) -> tuple[MemberValidationResult, ...]:
-        """Map validation rows, refusing a member that appears more than once.
+    def _unique_jobs(cls, items: list) -> tuple[ExternalJobSummary, ...]:
+        """Map job summaries, refusing a job that appears more than once.
 
-        NotificationService keys these by member ID, so a duplicate silently
-        wins over the row before it: an "ineligible" row followed by an
-        "eligible" row for the same member would end up sending.
+        Callers look a job up by ID and take the first match, so a repeated ID
+        with different details would build a notification from the stale row.
+        """
+        summaries = tuple(cls._summary(_object(item)) for item in items)
+        if len({summary.external_job_id for summary in summaries}) != len(summaries):
+            raise _unavailable("a duplicate job row")
+        return summaries
+
+    @classmethod
+    def _member_validations(
+        cls, rows: list, requested: list[str]
+    ) -> tuple[MemberValidationResult, ...]:
+        """Map validation rows, requiring exactly the members that were asked about.
+
+        NotificationService keys these by member ID and turns a row it cannot
+        find into MEMBER_NOT_FOUND, a business conclusion. So a duplicate (the
+        later row silently wins), an answer about someone who was not asked
+        about, and a missing answer are all provider failures rather than
+        outcomes: otherwise a mixed-up or truncated response tells an operator
+        that a real member does not exist.
         """
         results = tuple(cls._member_validation(_object(row)) for row in rows)
-        if len({result.external_member_id for result in results}) != len(results):
+        answered = {result.external_member_id for result in results}
+        if len(answered) != len(results):
             raise _unavailable("a duplicate member validation row")
+        if answered != set(requested):
+            raise _unavailable("a validation result for a different set of members")
         return results
 
     @staticmethod
@@ -580,7 +605,8 @@ class HttpExternalBusinessGateway:
         # A URL cannot contain raw whitespace or control characters, and neither
         # urlsplit nor httpx.URL rejects them: "https://bad host" would survive
         # configuration and fail later as an apparent outage.
-        if any(character.isspace() or ord(character) < 0x20 for character in value):
+        if any(character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+               for character in value):
             raise ExternalBusinessNotConfiguredError(
                 "external business base URL is invalid"
             )
@@ -594,6 +620,8 @@ class HttpExternalBusinessGateway:
         if (
             not parsed.scheme
             or not parsed.netloc
+            # "https://:443" has a netloc but no host to send anything to.
+            or not parsed.hostname
             or parsed.scheme not in {"http", "https"}
             or parsed.username is not None
             or parsed.password is not None
