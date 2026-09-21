@@ -333,6 +333,90 @@
         "title": "NotificationResult",
         "type": "object"
       },
+      "SendCapabilityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/ServiceOrganizationScope"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "title": "SendCapabilityRequest",
+        "type": "object"
+      },
+      "SendCapabilityResponse": {
+        "additionalProperties": false,
+        "description": "Configuration readiness only; not a provider availability guarantee.",
+        "properties": {
+          "blocking_reasons": {
+            "default": [],
+            "items": {
+              "enum": [
+                "sending_disabled",
+                "live_send_disabled",
+                "allowlist_missing",
+                "invalid_max_recipients",
+                "message_prefix_missing",
+                "access_token_missing",
+                "liff_url_invalid"
+              ],
+              "type": "string"
+            },
+            "title": "Blocking Reasons",
+            "type": "array"
+          },
+          "live_send_enabled": {
+            "title": "Live Send Enabled",
+            "type": "boolean"
+          },
+          "max_recipients": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Recipients"
+          },
+          "message_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Prefix"
+          },
+          "mode": {
+            "enum": [
+              "disabled",
+              "staging_live",
+              "production_live"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode",
+          "live_send_enabled",
+          "ready",
+          "max_recipients"
+        ],
+        "title": "SendCapabilityResponse",
+        "type": "object"
+      },
       "ServiceOrganizationScope": {
         "additionalProperties": false,
         "description": "Stable cross-system scope.\n\nBoth values are external-business contract identifiers. ``organization_id``\nidentifies the organization and ``service_id`` identifies its business\nservice. The LINE side resolves its private channel, LIFF, and Messaging\nconfiguration from the external ``service_id``; the ID is not itself a LINE\nchannel, account, or configuration identifier.",
@@ -649,6 +733,52 @@
         "summary": "Get Notification Result",
         "tags": [
           "notification-command"
+        ]
+      }
+    },
+    "/internal/v1/send-capability:check": {
+      "post": {
+        "operationId": "check_send_capability_internal_v1_send_capability_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendCapabilityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendCapabilityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "LineInternalBearer": []
+          }
+        ],
+        "summary": "Check Send Capability",
+        "tags": [
+          "send-capability"
         ]
       }
     },

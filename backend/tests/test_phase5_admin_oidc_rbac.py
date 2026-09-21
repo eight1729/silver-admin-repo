@@ -5,11 +5,13 @@ import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
-from fastapi import HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 
 from app.adapter.oidc_staff_auth import OidcStaffAuthenticator, OidcTokenValidator
 from app.api.admin_auth import (
     get_staff_authenticator_http,
+    get_admin_runtime_settings,
+    get_staff_identity_repository,
     require_admin_operator,
     require_admin_role,
     require_admin_viewer,
@@ -187,3 +189,53 @@ def test_production_missing_token_and_disabled_oidc_fail_closed():
         get_staff_authenticator_http(credentials, None, settings, Repository())
     assert disabled.value.status_code == 503
     assert disabled.value.detail == {"error": "staff_auth_unavailable"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case,expected",
+    [
+        ("no_token", 401), ("invalid", 401), ("issuer", 401),
+        ("audience", 401), ("expired", 401), ("unknown", 403),
+        ("inactive", 403), ("service", 403), ("viewer", 403),
+        ("authorized", 200), ("config", 503),
+    ],
+)
+async def test_production_bearer_staff_authorization_http(oidc_material, monkeypatch, case, expected):
+    """Exercise real HTTP Bearer and exception mapping without DB or external JWKS."""
+    issue, jwks_client = oidc_material
+    monkeypatch.setattr("app.services.http_client.get_client", lambda: jwks_client)
+    settings = AdminSettings(
+        app_env="production", admin_oidc_enabled=True,
+        admin_oidc_issuer=ISSUER, admin_oidc_audience="" if case == "config" else AUDIENCE,
+        admin_oidc_jwks_url="https://idp.example.test/jwks", admin_oidc_algorithms="RS256",
+    )
+    repository = Repository(
+        known=case != "unknown", active=case != "inactive",
+        permissions=(("service-a", StaffRole.VIEWER if case == "viewer" else StaffRole.OPERATOR),),
+    )
+    app = FastAPI()
+    app.dependency_overrides[get_admin_runtime_settings] = lambda: settings
+    app.dependency_overrides[get_staff_identity_repository] = lambda: repository
+
+    @app.post("/protected")
+    async def protected(staff=Depends(require_admin_operator)):
+        return {"service_id": staff.service_id}
+
+    overrides = {
+        "issuer": {"iss": "https://wrong.example.test"},
+        "audience": {"aud": "wrong"},
+        "expired": {"exp": datetime.now(timezone.utc) - timedelta(seconds=1)},
+    }.get(case, {})
+    headers = {"X-Service-ID": "service-b" if case == "service" else "service-a"}
+    if case != "no_token":
+        headers["Authorization"] = "Bearer " + ("invalid" if case == "invalid" else issue(**overrides))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="https://admin.example.test",
+        cookies={"admin_authenticated": "1"},
+    ) as client:
+        response = await client.post("/protected", headers=headers)
+    assert response.status_code == expected
+    if expected == 200:
+        assert response.json() == {"service_id": "service-a"}
+    await jwks_client.aclose()

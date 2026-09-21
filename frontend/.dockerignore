@@ -1,0 +1,37 @@
+# Frontend-only context: default deny, then admit the existing build inputs.
+**
+!package.json
+!package-lock.json
+!tsconfig.json
+!next-env.d.ts
+!app/
+!app/**
+!config/
+!config/load-target-env.js
+!targets/
+!targets/admin/
+!targets/admin/**
+
+# Exclusions take priority over source-tree includes.
+**/.env
+**/.env.*
+**/.npmrc
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/secrets*
+**/credentials*
+**/service-account*
+**/node_modules
+**/.next
+**/.next-*
+**/.git
+**/.cache
+**/coverage
+**/test-results
+**/playwright-report
+**/*.test.*
+**/*.spec.*
+**/*.tsbuildinfo
+**/*.log

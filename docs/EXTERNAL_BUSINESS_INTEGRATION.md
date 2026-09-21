@@ -134,75 +134,198 @@ local integration の Fake を継承しない。必要な設定がない場合�
 既存 Fake の会員2機能は Slice 1.1 の未設定例外のままである。
 Summary の最終表示項目と既存 `CandidateMember.line_subject` は前節の NOTE を維持する。
 
-## Current DB Adapter — Slice 1.3
+## Current DB Schema Gate — Phase 3 / Slice 3.1
 
-人間による検証 DB の schema 確認結果を根拠として、
-`backend/app/adapter/current_db_external_business.py` に read-only Adapter を実装する。
-ここでの UUID / table / revision の取り決めは Current DB に限定され、将来の
-Production Adapter の ID や schema を規定しない。Domain / Internal API は変更しない。
+以下は **code-level expected schema**。現在の
+[CurrentDbExternalBusinessGateway](../backend/app/adapter/current_db_external_business.py)
+を正本とする。実DBの観測・確認結果ではない。過去の記録にあった「人間確認済み」の
+PK / UNIQUE / FK / trigger / データ整合性も、今回の配備先では未検証としてManual Gateで再確認する。
+この取り決めはCurrent DB専用で、将来のProduction providerのschemaやID形式を規定しない。
+前節のSlice 1.1–1.2は導入時の履歴。現在は検索・候補者検索・通知対象検証も実装済み。
 
-| Domain | Current DB mapping |
+### Expected tables / columns / types
+
+SQLAlchemyの参照用table clauseはすべてschema `public`。
+以下の型はコードが期待する型であり、実DBのDDL・nullability・constraintを観測したものではない。
+
+| Table | Column | Code expects |
+| --- | --- | --- |
+| public.members | id | UUID（Uuid） |
+| public.members | member_code, full_name, center_code | Text |
+| public.jobs | id | UUID（Uuid） |
+| public.jobs | job_code, title, summary, location_text, work_date_text, status, center_code | Text |
+| public.jobs | updated_at | DateTime(timezone=True)。読取り結果は非NULLのtimezone-aware datetimeが必要 |
+| public.job_recommendation_flags | member_id, job_id | UUID（Uuid） |
+| public.job_recommendation_flags | center_code | Text |
+| public.job_recommendation_flags | is_recommended | Boolean |
+
+`id`は安定した一意ID、推薦は会員・求人への整合した参照であることが期待される。
+Clause自体にPK / FK / UNIQUE / NOT NULLのDDL定義はない。
+`job_code`は宣言・全求人列SELECTには含まれるが、ID検索・domain projectionには使用しない。
+求人titleはdomain上の必須文字列。summary / location / schedule等は後述のnullable projectionに従う。
+NULL statusや未定義statusは現在のenum変換でUNKNOWNとなる。DBで許容する値・NULLの実態は未確認。
+
+### Identifiers and scope
+
+- `external_member_id = str(members.id)`。通常のUUID文字列表現で返す。
+- `member_number = members.member_code`。会員番号をIDにfallbackしない。
+- `external_job_id = str(jobs.id)`。`job_code`は業務コードでありIDの代用にしない。
+- `service_id`、`organization_id`、`center_code`は別の責務。
+  `ADMIN_INTERNAL_API_SCOPES`でservice → organization、
+  `CURRENT_DB_BUSINESS_CENTERS`でorganization → centerを解決する。
+- 空・不正なcenter mappingは`ExternalBusinessNotConfiguredError`。
+  未登録organizationは`OrganizationServiceScopeNotConfiguredError`で、DB照会前に失敗する。
+  organizationをcenterとして使うfallbackはない。
+- Internal APIはtrusted service mappingを使い、browserから任意のcenterを指定するcontractはない。
+  Staff経路のservice認可、runner execution ownershipもcenter mappingとは別。
+- UUID lookupはUUIDとしてparseする。通知validationの結果照合とInternal Serviceの応答ID整合確認は
+  文字列等値を使うため、Gatewayが返したcanonical ID文字列をそのまま引き回す。
+
+### Member verification / summary
+
+本人照合はcenter内で`member_code == member_number`かつ`full_name == name`。
+コードによるtrim・normalization・fuzzy / partial matchingはない。SQL等値の実際の
+collation挙動はManual Gateで確認する。最大2件を取得し、0件はNO_MATCH、
+1件はUNIQUE_MATCHとUUID ID、2件以上はMULTIPLE_MATCH。
+Unique以外はdomain IDがNone、Internal APIではIDキー自体を返さない。
+
+SummaryはcenterとUUID `members.id`で検索し、
+`external_member_id`と`display_label = full_name`だけを返す。
+不存在・他center・UUIDとして不正なIDはExternalMemberNotFoundError。
+生年月日・住所・電話・LINE subject等は追加しない。
+
+### Recommended jobs / candidates
+
+推薦はmembers → job_recommendation_flags → jobsのjoin。
+member_id / job_idを結合し、**3 tableそれぞれ**のcenterが解決済みcenterと一致、
+is_recommendedがtrueの場合だけ返す。Flagだけscope一致でも他centerの会員・求人を通さない。
+先に会員summaryを確認し、不存在と「推薦0件」を区別する。
+
+推薦順はjobs.id ASC。Ranking / scoreはない。Adapterはpublished限定にしない
+（LINEの公開求人表示側の認可・filterとは別）。
+候補者検索も同じ3 tableのscopeとtrue flagを使い、members.id ASC。
+CandidateはID、full_name、eligible=true、空reason_codesを返し、
+match_rank / line_subject / preference_summaryはNone。
+候補者検索自体ではjob status / revisionを検証しない。最終適格性は通知validationで判定する。
+
+### Job mapping
+
+| Domain field | Current DB source / behavior |
 | --- | --- |
-| 本人照合の会員番号・氏名 | `public.members.member_code` と `full_name` の等値検索。加工しない。 |
-| `external_member_id` | `public.members.id`（UUID PRIMARY KEY）。人間が Current DB の安定 ID と確認済み。 |
-| Summary `display_label` | `members.full_name`。ID とラベルの2項目だけ取得する。 |
-| `external_job_id` | `public.jobs.id`（UUID PRIMARY KEY）。`job_code` は別の業務コードで、ID検索には使わない。 |
-| 推薦元 | `public.job_recommendation_flags`。`member_id` / `job_id` で会員・求人へ結合し、`is_recommended = true`。 |
-| scope | 信頼する organization → `center_code` の設定。会員・推薦フラグ・求人の全対象に等値条件を適用。 |
-| `version` / `updated_at` | `jobs.updated_at` を UTC に変換。version は `astimezone(timezone.utc).isoformat()`。 |
+| external_job_id | str(jobs.id) |
+| title | title |
+| Summary.summary | summaryをそのまま |
+| Detail.description | summary or 空文字（NULL・空文字とも空文字） |
+| Summary.work_location_summary / Detail.work_location | location_text |
+| Summary.work_schedule_summary / Detail.work_schedule_text | work_date_text |
+| status | JobStatus: draft / published / paused / closed / cancelled / unknown。未定義値はUNKNOWN |
+| version / updated_at | updated_atをUTCへ変換しISO文字列 / datetimeとして返す |
+| application_deadline | None |
+| Detail.required_conditions | 空tuple |
+| Detail.staff_notes / job_url | None |
+| Summary.work_days / work_time | None |
 
-人間確認済み制約は `(center_code, member_code)` と `(center_code, job_code)` の
-UNIQUE、推薦の `(center_code, job_id, member_id)` UNIQUE、推薦から会員・求人への FK。
-確認時点で推薦の参照欠落・center 不整合はない。Adapter はこの観測だけに依存せず、
-全 join 対象の center を検証する。照合は最大2件を取得し、UNIQUE 制約下では通常
-発生しない複数件も既存の `MULTIPLE_MATCH` として表す。
+DetailはcenterとUUIDで検索。不存在・他center・不正UUIDはExternalJobNotFoundError。
+取得元のない情報を推測しない。`published_at`は参照clauseにもなく、
+revision・締切への転用もない。
 
-求人のタイトル・概要は `title` / `summary`、所在地は `location_text`、日程は
-`work_date_text` を使う。独立した詳細説明の取得元は提示されていないため、
-Current DB の `description` は `summary` を利用し、NULL のときは空文字とする。
-対応元がない締切・職員メモ・URL・追加勤務項目は `None`、必要条件は空 tuple。
-`published_at` は公開日時として確認済みだが、既存 domain に該当欄がないため
-取得・露出せず、更新日時や締切へ転用しない。
-status は既存 `JobStatus` と一致する値を使い、未定義値は `UNKNOWN`。
-既存推薦 contract は公開求人限定を要求しないため、新たな status フィルタは追加しない。
-推薦の順序は ID 順で固定し、score・ranking の意味は持たせない。
+### Search / count / pagination
 
-`updated_at` には人間確認済みの BEFORE UPDATE trigger がある。この更新日時を
-Current DB の revision とする。NULL・timezone のない日時からは revision を捏造せず、
-依存障害とする。不存在または scope 外の会員・求人は既存 not-found 例外、DB 障害は
-`ExternalSystemUnavailableError` に変換し、SQL・引数・接続情報を応答に含めない。
+`search_jobs`は以下をcountとitemsの両方へ適用する。
 
-### Configuration and runtime
+- 解決したcenterの等値条件。
+- statusesが非空ならstatus IN（enumの文字列値）。空tuple / Noneならstatus条件なし。
+- updated_from以上・updated_to以下（両端inclusive）。
+- keywordが空白以外ならtrimし、title / summary / location_textに
+  `ILIKE %keyword%`のOR。SQL wildcardの% / _はescapeしない現行仕様。
+- Orderはupdated_at DESC、id ASC。Pageは1始まり、offset=(page−1)×page_size、limit=page_size。
+  JobSearchQueryはpage / page_size >= 1を要求し、defaultは1 / 20。
+- Countは`func.count().label("total")`を使い、
+  `count_rows[0]["total"]`でRowMapping参照する。整数index参照には戻さない。
+- Domain field名は`total_count`。0件は0・items空・has_next=false。
+  `has_next = page * page_size < total_count`。範囲外pageでもtotal_countは一致する。
+  Countとitemsは別SELECTであり、同時更新時のsnapshot一貫性を新たに保証するものではない。
 
-追加設定は `CURRENT_DB_BUSINESS_CENTERS` のみ。organization ID → Current DB の
-center_code を JSON object で運用設定する。既存 `ADMIN_INTERNAL_API_SCOPES` の
-service → organization 解決を維持し、その後 Adapter が center を解決する。
-設定は `.env.example` に空の placeholder のみ追加。実 `.env` は変更しない。
-空・不正な設定は依存未設定、未登録 organization は scope エラーとして fail closed。
-organization ID と center_code の同一性を仮定した fallback は行わない。
+### Revision / notification validation
 
-Internal API の既定 Provider は Current DB Adapter。既存 `get_engine()` / AsyncConnection
-を使い、現在の `DATABASE_URL` を再利用するが、Adapter は engine 注入を受けるため
-通知 persistence と同一 DB であることを Application / domain の前提にしない。
-既存ローカルスタッフ画面の composition は変更せず、Internal API の Fake fallback
-だけを外す。将来の Provider は既存の明示 Gateway 注入で差し替えられる。
+`jobs.updated_at`はtimezone-aware datetime必須。UTCへ変換し、
+`astimezone(timezone.utc).isoformat()`をversionとする。
+None・naive datetime・不正な値はExternalSystemUnavailableError。
+別日時や現在時刻で補完しない。Version比較は文字列等値で、数値・日時順序比較ではない。
+更新時にupdated_atが変わる仕組みは実DBのManual Gateで確認する。
 
-対象4機能以外の Port メソッド（連携可否・全求人検索・候補者検索・通知対象検証）は、
-確認済み業務ルールがないため未設定例外を返す。今回の Adapter をそれらの実装済み
-Provider としてスタッフ通知経路へ接続しない。
+`validate_notification_targets`の現行依存は次のとおり。
 
-### Verification and manual gate
+- Job UUIDとcenterで存在を確認。存在しない / 他centerならjob_eligible=false、
+  JOB_NOT_FOUND、current_job_versionは空文字、membersは空tuple。
+  不正なjob UUIDはExternalJobNotFoundError。
+- PUBLISHEDだけstatus上適格。CLOSED / PAUSED / CANCELLEDは対応reason、
+  DRAFT / UNKNOWN等はUNKNOWN。Revisionが不正なら依存障害。
+- 指定member UUIDとcenterを検索し、同じjob・centerのrecommendationをouter join。
+  不在・他center・不正member UUIDはMEMBER_NOT_FOUND、
+  flagなし / falseはMEMBER_NO_LONGER_CANDIDATE。
+- 推薦trueのmemberはjob statusが適格かつexpected_job_versionが一致した場合だけeligible。
+  Version相違はjob-level JOB_VERSION_CHANGED。Job理由で不適格な推薦memberの
+  member reasonはNoneの場合があり、job-level結果と合わせて判断する。
+- Active属性、独自スコア、追加資格やLINE連携状態をbusiness schemaから推測しない。
+  validated_atは検証時刻であり、job versionの取得元ではない。
 
-focused tests はテスト内の relational DB / async connection double で SELECT・join・
-scope 分離を実行する。SQLite はテスト限定で、timestamp は PostgreSQL 相当の
-timezone-aware 値を double が返す。実 DB・実データ・実 `.env` へのアクセスはしない。
-SQLAlchemy の table clause は参照専用で、共有 metadata・DDL・migration は追加しない。
+[NotificationService](../backend/app/application/notification_service.py)は送信時にも
+validate_operationを再実行し、get_job_detail / list_candidate_members /
+validate_notification_targetsを呼ぶ。その後、Phase 1のsend capability guardが
+永続outbox予約前に送信可否と人数を再確認する。
+Business validationとLINE sender最終制限は別の責務で、今回どちらも変更しない。
+`check_link_eligibility`だけは引き続き未設定例外を返す。本人照合を連携可否の代用にしない。
 
-運用時には以下を手動確認する:
+### Errors / read-only ownership
 
-- 許可 service / organization と center の設定、および3テーブルへの読取権限。
-- 実接続で4 endpoint が動作し、別 center の情報を返さないこと。
-- `updated_at` が timezone-aware かつ非 NULL で、更新時に revision が変わること。
-- Current DB の概要を詳細説明にも使う表示と、未対応任意項目の空値が検証用途に適すること。
+| 状況 | Adapter / Internal API |
+| --- | --- |
+| 会員・求人lookup不存在 / 不正UUID | 対応NotFound例外 / 404 resource_not_found |
+| Organization未設定 | Scope例外 / 403 scope_forbidden |
+| Center mapping空・不正 | ExternalBusinessNotConfiguredError / 503 external_system_unavailable |
+| SQLAlchemyError / TimeoutError / OSError | 固定文言のExternalSystemUnavailableError / 503 external_system_unavailable |
+| NULL / naive / 不正timestamp | ExternalSystemUnavailableError / 503 external_system_unavailable |
+| 未定義status | JobStatus.UNKNOWN（DB障害へ変換しない） |
+| 想定外例外 | InternalRouteが500 internal_errorへ変換 |
 
-LINE identity table・登録詳細を参照せず、DB schema / データ変更と Phase 2 は行わない。
+通知validationのjob不在は前節の業務結果であり、lookupの404とは区別する。
+SQL本文・bind値・接続情報・raw exceptionをInternal HTTP responseへ出さない。
+Proxy / APMログの確認はManual Gate。エラー体系の再設計はしない。
+
+AdapterはSELECTのみ。INSERT / UPDATE / DELETE / DDL / reflection / create_all /
+migrationを持たず、business schema ownerにならない。
+Admin-owned通知5 tables・Staff tables、LINE-owned canonical 3 tablesとは別owner。
+同じDATABASE_URLを使う現在compositionでも、この責務分離は変わらない。
+Businessへのpersistence用FK追加や、LINE legacy metadata全体のcreate_allは行わない。
+LINE旧business metadataはこのexpected schemaの正本ではない。
+
+現在のInternal API既定providerと明示runner ownership付きAdmin canonical compositionは
+Current DB Adapterを使用する。必要設定なしにFakeへfallbackしない。
+Engineは注入可能であり、将来Production providerへ差し替えるためにdomain / Internal APIを変更しない。
+
+### DEPLOYMENT-PRECHECK MANUAL GATE — 実DBでは未実施
+
+[Deployment Runbook](DEPLOYMENT_RUNBOOK.md)のDB gateに、以下をschema照合の詳細として適用する。
+本SliceではDB接続・introspection・SQL発行・migration・actual env読取りを行わない。
+
+- [ ] public.membersの存在、上表全列、UUID id、member_code / full_name / center_codeの型とNULL・照合規則。
+- [ ] public.jobsの存在、上表全列、UUID id、status実値、center_code、updated_atが非NULLかつtimezone-aware。
+- [ ] public.job_recommendation_flagsの存在、上表全列、UUID member_id / job_id、boolean is_recommended、center_code。
+- [ ] IDsの一意性・安定性、recommendation→member / jobの参照、3 tableのcenter整合、重複flagの有無。
+  PK / FK / UNIQUEの実定義を記録する。コードは推薦の重複をdistinct化しないため重複を放置しない。
+- [ ] 同centerの本人照合unique / no match / multiple matchの取扱い、空白や会員番号先頭ゼロの保持。
+  実constraintでmultiple matchが不可能な場合は、その定義とoffline coverageを記録し実データを壊して再現しない。
+- [ ] Summary、推薦（0件・他center除外）、job detail、求人検索のstatus / keyword / 日時 / pagination / countを確認。
+- [ ] Job更新でversionが変わること、UTC変換、送信前のstatus / 推薦取消 / version変更が拒否されること。
+- [ ] Admin runtime userがbusiness 3 tablesをSELECT可能。Adapterにbusiness write権限は不要。
+  同じユーザーのowned persistence書込み権限とは分けて確認する。
+- [ ] 未対応項目のNone / 空値とsummary→descriptionの表示が検証用途に適すること。
+- [ ] 相違があればbaseline判定を保留し、観測結果を別途記録する。コードへ合わせるmigrationを本Sliceで行わない。
+
+### Focused offline verification
+
+[test_current_db_external_business.py](../backend/tests/test_current_db_external_business.py)は
+test-only SQLiteとasync connection doubleでSELECT / join / scope / mappingを確認する。
+SQLiteのtimezone制約はdoubleで補い、revision変換は別の直接テストで確認する。
+これは実PostgreSQLの型・collation・権限・制約・更新triggerを確認した証拠ではない。

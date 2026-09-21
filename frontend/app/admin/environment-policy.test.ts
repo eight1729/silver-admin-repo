@@ -70,9 +70,9 @@ test("staging omits the reset control and uses verification copy", async () => {
   assert.match(page, /allowDemoReset\s*&&\s*<div/);
   assert.match(page, />デモデータをリセット<\/button>/);
   assert.match(layout, /準本番検証環境/);
-  assert.match(layout, /業務データはモックです/);
-  assert.match(layout, /現在は実LINE通知を送信しません/);
-  assert.match(layout, /Backend再起動で一時データが初期化されます/);
+  assert.match(layout, /現在のLINE送信モードと送信可否を画面内で確認/);
+  assert.match(layout, /送信時にはBackendでも再検証/);
+  assert.doesNotMatch(layout, /業務データはモックです|現在は実LINE通知を送信しません|Backend再起動で一時データが初期化されます/);
   assert.match(layout, /LOCAL DEMO/);
   assert.match(layout, /ローカルデモ環境/);
 });
@@ -99,8 +99,8 @@ test("Admin exposes safe staging LINE mode and enforces one-recipient UI", async
   const admin = await readFile(new URL("../lib/admin-api.ts", import.meta.url), "utf8");
   assert.match(admin, /\/admin\/line-send-mode/);
   assert.match(admin, /notification-link/);
-  assert.match(page, /lineSendMode\?\.mode === "staging_live"/);
-  assert.match(page, /lineSendMode\.ready/);
+  assert.match(page, /isLiveMode\(lineSendMode\)/);
+  assert.match(page, /canAttemptSend\(lineSendMode/);
   assert.match(page, /deriveNotificationUiState/);
   assert.match(page, /canSend=\{workflowState\.canSend\}/);
   assert.match(policy, /args\.selectedCount === 1/);
@@ -110,12 +110,12 @@ test("Admin exposes safe staging LINE mode and enforces one-recipient UI", async
   assert.match(policy, /!args\.liveBlocked/);
   assert.match(policy, /args\.liveLinkReady/);
   assert.match(policy, /!args\.queueFailure/);
-  assert.match(panels, /実LINE検証は送信可能な1名に限定されます/);
+  assert.match(panels, /現在の送信モードと送信可能な対象者を確認/);
   assert.match(panels, /formatBlockingReasons\(lineSendMode\)/);
   assert.match(panels, /送信後は取り消せません/);
   assert.match(page, /notificationLink/);
-  assert.match(page, /実LINE送信結果/);
-  assert.match(page, /lineSendMode\?\.mode === "staging_live" && lineSendMode\.ready/);
+  assert.match(page, /通知送信結果/);
+  assert.match(page, /canAttemptSend\(lineSendMode/);
   assert.doesNotMatch(page, /STAGING_LINE_ALLOWED_SUBJECTS/);
   assert.doesNotMatch(page, /STAGING_LINE_ALLOWED_MEMBER_ID/);
   assert.doesNotMatch(page, /LINE_MESSAGING_CHANNEL_ACCESS_TOKEN/);
@@ -124,6 +124,9 @@ test("Admin exposes safe staging LINE mode and enforces one-recipient UI", async
 
 test("staging live blocked reasons use the complete safe Japanese mapping", () => {
   assert.deepEqual(Object.keys(blockingReasonMessages), [
+    "sending_disabled",
+    "live_send_disabled",
+    "line_capability_unavailable",
     "invalid_max_recipients",
     "allowlist_missing",
     "message_prefix_missing",
@@ -166,7 +169,7 @@ test("blocked reason formatting deduplicates reasons and hides unknown codes", (
 
 test("blocked reasons are hidden for empty, fake, and live ready modes", () => {
   assert.deepEqual(formatBlockingReasons({ mode: "staging_live", max_recipients: 1, message_prefix: null, ready: false, blocking_reasons: [] }), []);
-  assert.deepEqual(formatBlockingReasons({ mode: "fake", max_recipients: null, message_prefix: null, ready: false, blocking_reasons: ["allowlist_missing"] }), []);
+  assert.deepEqual(formatBlockingReasons({ mode: "fake", max_recipients: null, message_prefix: null, ready: false, blocking_reasons: ["allowlist_missing"] }), [blockingReasonMessages.allowlist_missing]);
   assert.deepEqual(formatBlockingReasons({ mode: "staging_live", max_recipients: 1, message_prefix: "configured", ready: true, blocking_reasons: ["allowlist_missing"] }), []);
 });
 

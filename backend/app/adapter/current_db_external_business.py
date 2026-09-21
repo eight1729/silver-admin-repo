@@ -191,8 +191,8 @@ class CurrentDbExternalBusinessGateway:
             conditions.append(or_(_jobs.c.title.ilike(pattern), _jobs.c.summary.ilike(pattern),
                                   _jobs.c.location_text.ilike(pattern)))
         where = and_(*conditions)
-        count_rows = await self._rows(select(func.count()).select_from(_jobs).where(where))
-        total = int(count_rows[0][0]) if count_rows else 0
+        count_rows = await self._rows(select(func.count().label("total")).select_from(_jobs).where(where))
+        total = int(count_rows[0]["total"]) if count_rows else 0
         rows = await self._rows(select(_jobs).where(where).order_by(_jobs.c.updated_at.desc(), _jobs.c.id)
                                 .offset((query.page - 1) * query.page_size).limit(query.page_size))
         return PagedExternalJobs(tuple(self._job_summary(row) for row in rows), query.page, query.page_size,

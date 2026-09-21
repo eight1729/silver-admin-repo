@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import type { AdminLineSendMode } from "../lib/admin-api";
 import { DEFAULT_CENTER_DISPLAY_NAME } from "./notification-templates";
+import { modePresentation } from "./send-capability";
 
 const navigationItems = [
   { label: "ダッシュボード", icon: "⌂", href: "/admin/dashboard" },
@@ -13,12 +14,6 @@ const navigationItems = [
   { label: "レポート", icon: "▥", href: "/admin/reports" },
   { label: "設定", icon: "⚙", href: "/admin/settings" },
 ] as const;
-
-function modePresentation(mode: AdminLineSendMode | null) {
-  if (mode?.mode !== "staging_live") return { label: "Fake", detail: "実LINE送信は行いません", tone: "fake" };
-  if (mode.ready) return { label: "実LINE送信可能", detail: "検証者1名に限定", tone: "ready" };
-  return { label: "実LINE送信ブロック中", detail: "送信設定を確認してください", tone: "blocked" };
-}
 
 export function AdminShell({ mode, children }: { mode: AdminLineSendMode | null; children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);

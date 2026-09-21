@@ -1,3 +1,4 @@
+import { canAttemptSend, isLiveMode, modePresentation, safetyPrefix, sendWarning } from "./send-capability";
 import { useEffect, useRef, useState } from "react";
 import type {
   AdminCandidate,
@@ -123,7 +124,7 @@ export function MessageEditorPanel({ job, message, setMessage, selectedTemplate,
 }) {
   const body = notificationBody(message);
   const valid = Object.values(message).every((value) => value.trim());
-  const liveReady = lineSendMode?.mode === "staging_live" && lineSendMode.ready === true;
+  const liveReady = isLiveMode(lineSendMode) && canAttemptSend(lineSendMode);
   const canonicalLink = liveReady ? notificationLink : job.job_url;
   return <div className="major-panel-content">
     <div className="notification-message-heading"><label htmlFor="notification-body">通知メッセージ</label><select aria-label="通知テンプレート" value={selectedTemplate} disabled={busy} onChange={(event) => applyTemplate(event.target.value as SelectedTemplateId)}><option value="custom" disabled>カスタム</option>{notificationTemplates.map((template) => <option value={template.id} key={template.id} disabled={template.requiresJob && !job}>{template.label}</option>)}</select></div>
@@ -132,7 +133,7 @@ export function MessageEditorPanel({ job, message, setMessage, selectedTemplate,
     <div className="compact-editor-field"><label htmlFor="center-display-name">センター名</label><input id="center-display-name" value={centerDisplayNameDraft} maxLength={CENTER_DISPLAY_NAME_MAX_LENGTH} onChange={(event) => setCenterDisplayNameDraft(event.target.value)} /></div>
     <div className="compact-editor-field"><label htmlFor="notification-note">注意事項</label><textarea id="notification-note" className="notification-note" value={noticeDraft} onChange={(event) => setNoticeDraft(event.target.value)} aria-describedby="notification-note-count"/><small id="notification-note-count" aria-live="polite">{noticeDraft.length}文字</small></div>
     <div className="editor-reflect-actions"><button className="admin-button secondary compact" type="button" disabled={busy || !centerDisplayNameDraft.trim() || !editorFieldsChanged} onClick={applyEditorFields}>本文へ反映</button></div>
-    <p className="system-supplied-note"><strong>システム付与:</strong> {liveReady ? lineSendMode.message_prefix ?? "検証表示を確認中" : lineSendMode?.mode === "staging_live" ? "実LINE送信ブロック中" : "Fake送信（実LINE送信なし）"}。求人リンクと安全文言は編集できません。</p>
+    <p className="system-supplied-note"><strong>システム付与:</strong> {`${modePresentation(lineSendMode).label} ${safetyPrefix(lineSendMode)}`}。求人リンクと安全文言は編集できません。</p>
     {validationStale && <p className="validation-state is-stale" role="status">内容が変更されたため、再検証が必要です。</p>}
     {!valid && <p className="field-help-error" role="alert">通知メッセージを入力してください。</p>}
   </div>;
@@ -179,7 +180,7 @@ function SendOverview({ operation, validation, candidates, selected, validationC
   const selectedCount = operation?.selected_count ?? selected.size;
   const unlinkedCount = candidates.filter((candidate) => selected.has(candidate.member_id) && candidate.line_linked === false).length;
   const validating = action === "validating";
-  const hasProblem = !validating && (queueFailure || !operation || selectedCount === 0 || validation !== null && !validationCurrent || validation?.can_proceed === false || validation?.sendable_count === 0 || lineSendMode?.mode === "staging_live" && lineSendMode.ready !== true);
+  const hasProblem = !validating && (queueFailure || !operation || selectedCount === 0 || validation !== null && !validationCurrent || validation?.can_proceed === false || validation?.sendable_count === 0 || !canAttemptSend(lineSendMode, validation?.sendable_count ?? 0));
   const validated = !validating && validation !== null && validationCurrent && validation.can_proceed && !hasProblem;
   const problems = new Set<string>();
   if (selectedCount === 0) problems.add("対象会員が選択されていません。");
@@ -187,8 +188,9 @@ function SendOverview({ operation, validation, candidates, selected, validationC
   if (validation && !validationCurrent) problems.add("内容が変更されたため再検証が必要です。");
   if (unlinkedCount > 0) problems.add("LINE未連携のため送信できない対象があります。");
   if (validationCurrent && validation?.sendable_count === 0) problems.add("送信可能な対象者がいません。");
-  if (lineSendMode?.mode === "staging_live" && lineSendMode.ready !== true) {
+  if (!canAttemptSend(lineSendMode, validation?.sendable_count ?? 0)) {
     const reasons = formatBlockingReasons(lineSendMode);
+    if (lineSendMode?.max_recipients != null && (validation?.sendable_count ?? 0) > lineSendMode.max_recipients) problems.add(`送信上限は${lineSendMode.max_recipients}名です。`);
     if (reasons.length) reasons.forEach((reason) => problems.add(reason));
     else problems.add("送信モードが利用できません。");
   }
@@ -199,6 +201,7 @@ function SendOverview({ operation, validation, candidates, selected, validationC
       : hasProblem ? { icon: "×", text: "問題があります", className: "is-problem" }
         : { icon: "○", text: "検証してください", className: "is-pending" };
   return <>
+    <p className="compact-send-warning">{sendWarning(lineSendMode)}</p>
     <dl className="send-overview-list">
       <div><dt>対象会員数</dt><dd>{selectedCount}名</dd></div>
       <div><dt>LINE未連携数</dt><dd>{candidates.length || selectedCount === 0 ? `${unlinkedCount}名` : "—"}</dd></div>
@@ -211,7 +214,7 @@ function SendOverview({ operation, validation, candidates, selected, validationC
 
 function SendActionButtons({ operation, save, validate, send, canSaveDraft, canValidate, canSend, action, busy }: { operation: AdminOperation | null; save: () => Promise<void>; validate: () => Promise<void>; send?: () => Promise<void>; canSaveDraft: boolean; canValidate: boolean; canSend: boolean; action: WorkflowAction; busy: boolean }) {
   return <div className="compact-send-actions">
-    <p className="compact-send-warning"><span aria-hidden="true">!</span> 送信後は取り消せません。実LINE検証は送信可能な1名に限定されます。</p>
+    <p className="compact-send-warning"><span aria-hidden="true">!</span> 送信後は取り消せません。現在の送信モードと送信可能な対象者を確認してください。</p>
     <div className="compact-send-secondary"><button className="admin-button secondary" type="button" disabled={!canSaveDraft} onClick={() => void save()}>{action === "saving" ? "保存中…" : "下書き保存"}</button><button className="admin-button secondary" type="button" disabled={!canValidate} onClick={() => void validate()}>{action === "validating" ? "検証中…" : "検証"}</button></div>
     <button className="admin-button send-primary compact-send-primary" type="button" disabled={!canSend || !send} onClick={() => { if (send) void send(); }}>{action === "sending" ? "送信処理中…" : "送信実行"}<svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17"><path d="m3 3 18 9-18 9 4-9-4-9Zm4.7 8h7.8L6.1 6.3 7.7 11Zm-1.6 6.7 9.4-4.7H7.7l-1.6 4.7Z" fill="currentColor"/></svg></button>
     {!canSend && !busy && operation && <p className="compact-disabled-reason">送信には最新の検証結果と送信可能な対象者が必要です。</p>}

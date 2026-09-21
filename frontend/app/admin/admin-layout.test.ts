@@ -93,9 +93,7 @@ test("notification workspace omits the top step status and all six panel descrip
 
 test("mode presentation distinguishes Fake, live ready and live blocked without identifiers", async () => {
   const { shell } = await sources();
-  assert.match(shell, /label: "Fake"/);
-  assert.match(shell, /label: "実LINE送信可能"/);
-  assert.match(shell, /label: "実LINE送信ブロック中"/);
+  assert.match(shell, /modePresentation/);
   assert.doesNotMatch(shell, /member_id|service_id|line_subject|access token|Authorization|LIFF ID/);
 });
 

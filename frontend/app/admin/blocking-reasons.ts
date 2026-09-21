@@ -1,6 +1,9 @@
 import type { AdminLineSendMode } from "../lib/admin-api";
 
 export const blockingReasonMessages = {
+  sending_disabled: "LINE送信は無効です。",
+  live_send_disabled: "実LINE送信は有効化されていません。",
+  line_capability_unavailable: "LINE送信状態を確認できないため送信できません。",
   invalid_max_recipients: "実送信の送信人数設定が1名に固定されていません。",
   allowlist_missing: "検証対象者の許可設定が完了していません。",
   message_prefix_missing: "検証通知の識別表示が設定されていません。",
@@ -20,6 +23,6 @@ export function getBlockingReasonMessage(code: string): string {
 }
 
 export function formatBlockingReasons(mode: AdminLineSendMode | null): string[] {
-  if (mode?.mode !== "staging_live" || mode.ready === true) return [];
+  if (!mode || mode.ready === true) return [];
   return [...new Set((mode.blocking_reasons ?? []).map(getBlockingReasonMessage))];
 }
