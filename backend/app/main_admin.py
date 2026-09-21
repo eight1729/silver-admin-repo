@@ -65,8 +65,13 @@ def create_admin_app(
     # Build the external business provider once and hand the same instance to
     # both the Internal API (app.state) and the production composition. Wiring
     # only one of them splits the app: staff screens would read one provider
-    # while the Internal API reads another. An explicitly injected gateway
-    # (tests) wins; otherwise it is built from settings.
+    # while the Internal API reads another.
+    #
+    # Injection keeps the meaning it already had: an explicitly passed gateway
+    # serves the Internal API and suppresses the production composition rather
+    # than being handed into it. That branch is unchanged - it is why the flag
+    # below records injection instead of testing the variable, which is
+    # reassigned here. Only the settings-driven provider reaches both places.
     injected_external_business = external_business_gateway is not None
     if external_business_gateway is None:
         external_business_gateway = _external_business_from_settings(

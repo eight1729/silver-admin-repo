@@ -933,3 +933,20 @@ async def test_an_absent_job_reports_an_empty_string_version():
         expected_job_version="v1", external_member_ids=[],
     )
     assert result.current_job_version == ""
+
+
+def test_injection_serves_the_internal_api_without_a_production_composition(monkeypatch):
+    # Upstream behaviour, unchanged by the provider wiring: passing a gateway
+    # explicitly serves the Internal API and suppresses the production
+    # composition rather than handing the gateway into it. Pinned so that a
+    # later reading of the "same instance" comment cannot quietly widen it.
+    monkeypatch.setattr("app.db.engine.get_engine", lambda: SimpleNamespace(name="engine"))
+    from app.main_admin import create_admin_app
+
+    sentinel = object()
+    app = create_admin_app(
+        admin_settings_for(monkeypatch, admin_external_business_base_url=BASE),
+        external_business_gateway=sentinel,
+    )
+    assert app.state.admin_internal_business_gateway is sentinel
+    assert not hasattr(app.state, "admin_runtime_composition")
