@@ -82,7 +82,11 @@ def create_admin_app(
         )
 
         composition = build_local_integration_admin_composition(
-            runtime_settings=runtime_settings
+            # The same instance here too: leaving it out would put the Internal
+            # API on the configured provider and local integration on the
+            # Current DB.
+            runtime_settings=runtime_settings,
+            external_business=external_business_gateway,
         )
         app.state.admin_local_integration = composition
 

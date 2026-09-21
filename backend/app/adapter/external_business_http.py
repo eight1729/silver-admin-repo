@@ -229,6 +229,10 @@ class HttpExternalBusinessGateway:
         # A missing or non-boolean flag is not "no match": it is an outage.
         if not _decision_flag(body.get("eligible"), "eligible"):
             return MemberVerificationResult(MemberVerificationStatus.NO_MATCH)
+        # A match carrying a mismatch reason is read as neither, for the same
+        # reason it is rejected on candidates and validation rows.
+        if body.get("reason_code") is not None:
+            raise _unavailable("an eligible match with a reason code")
         # A match without an identifier is read as neither match nor mismatch.
         member_id = _required_text(body.get("external_member_id"), "member identifier")
         # display_label is discarded; get_member_summary owns the display name.
@@ -308,7 +312,7 @@ class HttpExternalBusinessGateway:
     ) -> ExternalJobDetail:
         body = _object(await self._request(
             "GET",
-            f"/v1/orgs/{_segment(external_organization_id)}/jobs/{_segment(external_job_id)}",
+            f"/v1/orgs/{_segment(external_organization_id)}/jobs/{_job_segment(external_job_id)}",
             not_found=ExternalJobNotFoundError,
         ))
         conditions = body.get("required_conditions")
@@ -336,7 +340,7 @@ class HttpExternalBusinessGateway:
         body = await self._request(
             "GET",
             f"/v1/orgs/{_segment(external_organization_id)}/jobs"
-            f"/{_segment(external_job_id)}/candidate-members",
+            f"/{_job_segment(external_job_id)}/candidate-members",
             not_found=ExternalJobNotFoundError,
         )
         if not isinstance(body, list):
@@ -354,7 +358,7 @@ class HttpExternalBusinessGateway:
         body = _object(await self._request(
             "POST",
             f"/v1/orgs/{_segment(external_organization_id)}/jobs"
-            f"/{_segment(external_job_id)}/validate-targets",
+            f"/{_job_segment(external_job_id)}/validate-targets",
             json={
                 "expected_job_version": expected_job_version,
                 "external_member_ids": list(external_member_ids),
@@ -367,22 +371,40 @@ class HttpExternalBusinessGateway:
         # and keeping eligible would reach the send decision in notification_service.
         if job_eligible and job_reason is not None:
             raise _unavailable("an eligible job with a reason code")
+        # An absent job answers with an empty version, so empty is allowed only
+        # when the job is not eligible. A missing or non-string field is not.
+        current_version = body.get("current_job_version")
+        if not isinstance(current_version, str):
+            raise _unavailable("an invalid current job version")
+        if job_eligible and not current_version:
+            raise _unavailable("an eligible job without a version")
         validated_at = _parse_datetime(body.get("validated_at"))
         if validated_at is None:
             raise _unavailable("no validation timestamp")
         return NotificationValidationResult(
             external_job_id=self._same_job(body.get("external_job_id"), external_job_id),
             job_eligible=job_eligible,
-            # An absent job answers with an empty version, so this one field is
-            # allowed to be empty.
-            current_job_version=_text(body.get("current_job_version")),
+            current_job_version=current_version,
             job_reason_code=job_reason,
-            members=tuple(self._member_validation(_object(item)) for item in members),
+            members=self._member_validations(members),
             validated_at=validated_at,
             external_request_id=_optional_text(body.get("external_request_id")),
         )
 
     # -- mapping -----------------------------------------------------------
+    @classmethod
+    def _member_validations(cls, rows: list) -> tuple[MemberValidationResult, ...]:
+        """Map validation rows, refusing a member that appears more than once.
+
+        NotificationService keys these by member ID, so a duplicate silently
+        wins over the row before it: an "ineligible" row followed by an
+        "eligible" row for the same member would end up sending.
+        """
+        results = tuple(cls._member_validation(_object(row)) for row in rows)
+        if len({result.external_member_id for result in results}) != len(results):
+            raise _unavailable("a duplicate member validation row")
+        return results
+
     @staticmethod
     def _same_job(value, requested: str) -> str:
         """Confirm the response describes the job that was requested.
@@ -472,7 +494,10 @@ class HttpExternalBusinessGateway:
                 },
                 timeout=TIMEOUT_SECONDS,
             )
-        except (httpx.TimeoutException, httpx.NetworkError) as error:
+        except httpx.TransportError as error:
+            # The base class, not only timeouts and network errors: a protocol
+            # or proxy failure must not escape as a generic exception.
+
             raise ExternalSystemUnavailableError(
                 "external business transport is unavailable"
             ) from error
@@ -491,9 +516,10 @@ class HttpExternalBusinessGateway:
             raise self._not_found(response, not_found)
         if response.status_code >= 500:
             raise ExternalSystemUnavailableError("external business is unavailable")
-        if response.status_code >= 400:
-            # 429 lands here too: rate limiting is never folded into a match
-            # outcome or an empty candidate list.
+        if not 200 <= response.status_code < 300:
+            # Everything that is not a success, including 3xx and 429. A redirect
+            # body is not an answer, and rate limiting is never folded into a
+            # match outcome or an empty candidate list.
             raise ExternalSystemUnavailableError(
                 f"external business rejected the request ({response.status_code})"
             )
@@ -569,9 +595,31 @@ class HttpExternalBusinessGateway:
         return value.rstrip("/")
 
 
+# quote() leaves dot segments intact and the HTTP client then resolves them,
+# so `/jobs/..` would be sent to `/v1/orgs/{org}` instead.
+_UNUSABLE_SEGMENTS = {"", ".", ".."}
+
+
 def _segment(value: str) -> str:
     """Escape an identifier placed in the path. Member numbers go in the body."""
-    return quote(str(value), safe="")
+    text = str(value)
+    if text in _UNUSABLE_SEGMENTS:
+        # Reached only through an organization scope, which is configuration.
+        raise ExternalBusinessNotConfiguredError(
+            "external business organization identifier is unusable"
+        )
+    return quote(text, safe="")
+
+
+def _job_segment(value: str) -> str:
+    """A job identifier that cannot be a path segment names no job.
+
+    The Current DB Adapter treats an unusable job identifier the same way.
+    """
+    text = str(value)
+    if text in _UNUSABLE_SEGMENTS:
+        raise ExternalJobNotFoundError("job was not found")
+    return quote(text, safe="")
 
 
 def _int(value, fallback: int) -> int:

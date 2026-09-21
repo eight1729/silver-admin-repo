@@ -124,18 +124,26 @@ def test_production_refuses_plaintext_http():
     )
 
 
+def assert_sent_to_base(request: httpx.Request):
+    # Compare the origin, not a string prefix: "https://business.example.test.evil"
+    # starts with the base URL but is a different host.
+    assert (request.url.scheme, request.url.host, request.url.port) == (
+        httpx.URL(BASE).scheme, httpx.URL(BASE).host, httpx.URL(BASE).port
+    )
+
+
 async def test_audience_is_configurable_and_the_destination_stays_the_base_url():
     provider, calls = gateway(json_handler(JOB_ITEM), audience="https://audience.example.test")
     await provider.get_job_detail(external_organization_id=ORG, external_job_id="job-1")
     assert provider.requested_audience == "https://audience.example.test"
-    assert str(calls[0].url).startswith(BASE)
+    assert_sent_to_base(calls[0])
 
 
 async def test_audience_defaults_to_the_base_url():
     provider, calls = gateway(json_handler(JOB_ITEM))
     await provider.get_job_detail(external_organization_id=ORG, external_job_id="job-1")
     assert provider.requested_audience == BASE
-    assert str(calls[0].url).startswith(BASE)
+    assert_sent_to_base(calls[0])
 
 
 # ---------------------------------------------------------------------------
@@ -477,20 +485,28 @@ async def test_an_absent_job_may_report_an_empty_current_version():
 # ---------------------------------------------------------------------------
 # Transport-level failures
 # ---------------------------------------------------------------------------
+# A complete, usable detail body. Pairing it with a non-success status means
+# only the status code can produce the failure: an implementation that read the
+# body and ignored the status would return a result and redden these tests.
+DETAIL = dict(JOB_ITEM, description="Body", work_location="Location",
+              work_schedule_text="Schedule", required_conditions=[],
+              staff_notes=None, job_url=None)
+
+
 def _call(provider):
     return provider.get_job_detail(external_organization_id=ORG, external_job_id="job-1")
 
 
-@pytest.mark.parametrize("status", [400, 422, 429, 500, 502, 503])
-async def test_error_statuses_become_unavailable(status):
-    provider, _ = gateway(json_handler({"error": "whatever"}, status=status))
+@pytest.mark.parametrize("status", [301, 302, 307, 400, 422, 429, 500, 502, 503])
+async def test_only_a_success_status_is_read_as_an_answer(status):
+    provider, _ = gateway(json_handler(DETAIL, status=status))
     with pytest.raises(ExternalSystemUnavailableError):
         await _call(provider)
 
 
 @pytest.mark.parametrize("status", [401, 403])
 async def test_a_rejected_caller_is_never_shown_as_a_business_outcome(status):
-    provider, _ = gateway(json_handler({"error": "caller_not_allowed"}, status=status))
+    provider, _ = gateway(json_handler(DETAIL, status=status))
     with pytest.raises(ExternalSystemUnavailableError):
         await _call(provider)
 
@@ -512,6 +528,9 @@ async def test_an_unparsable_body_is_unavailable():
 @pytest.mark.parametrize("error", [
     httpx.ConnectTimeout("timeout"), httpx.ReadTimeout("timeout"),
     httpx.ConnectError("refused"),
+    # Not only timeouts and network errors: a misbehaving peer or proxy must not
+    # escape as a generic exception and become a 500 instead of an outage.
+    httpx.RemoteProtocolError("bad peer"), httpx.ProxyError("bad proxy"),
 ])
 async def test_transport_failures_are_unavailable(error):
     def raising(request):
@@ -531,8 +550,9 @@ def admin_settings_for(monkeypatch, **overrides):
     monkeypatch.setenv("APP_ENV", "test")
     from app.core.settings_admin import AdminSettings
 
+    overrides.setdefault("app_env", "test")
     return AdminSettings(
-        _env_file=None, app_env="test", database_url="postgresql://unused/unused",
+        _env_file=None, database_url="postgresql://unused/unused",
         admin_internal_api_bearer_token=SecretStr("test-incoming"),
         admin_internal_api_scopes={"service-a": ORG},
         current_db_business_centers={ORG: "center-a"},
@@ -608,3 +628,105 @@ async def test_the_internal_api_reads_through_the_configured_provider(monkeypatc
     summary = await service.get_member_summary("service-a", "900001")
     assert summary.external_member_id == "900001"
     assert seen == [f"/v1/orgs/{ORG}/members:summary"]
+
+
+# ---------------------------------------------------------------------------
+# Review findings (2026-09-21): each case reproduces a behaviour that was
+# accepted before the fix.
+# ---------------------------------------------------------------------------
+async def test_verify_member_rejects_a_match_that_carries_a_mismatch_reason():
+    # Previously accepted as UNIQUE_MATCH: `eligible` and the ID were read while
+    # `reason_code` was never looked at, so a contradictory response became a
+    # confirmed identity.
+    provider, _ = gateway(json_handler(
+        {"eligible": True, "external_member_id": "900001",
+         "display_label": "Display", "reason_code": "not_matched"}
+    ))
+    with pytest.raises(ExternalSystemUnavailableError):
+        await provider.verify_member(
+            external_organization_id=ORG, verification=VERIFICATION
+        )
+
+
+async def test_validate_notification_targets_rejects_a_duplicated_member():
+    # NotificationService keys validation rows by member ID, so a second row for
+    # the same member silently wins. An ineligible row followed by an eligible
+    # one would end up sending to a member who must not be contacted.
+    provider, _ = gateway(json_handler(dict(VALIDATION, members=[
+        {"external_member_id": "900001", "eligible": False, "reason_code": "member_inactive"},
+        {"external_member_id": "900001", "eligible": True, "reason_code": None},
+    ])))
+    with pytest.raises(ExternalSystemUnavailableError):
+        await provider.validate_notification_targets(
+            external_organization_id=ORG, external_job_id="job-1",
+            expected_job_version="v1", external_member_ids=["900001"],
+        )
+
+
+@pytest.mark.parametrize("payload", [
+    {k: v for k, v in VALIDATION.items() if k != "current_job_version"},
+    dict(VALIDATION, current_job_version=None),
+    dict(VALIDATION, current_job_version=1),
+    # Eligible without a version defeats the staleness check entirely.
+    dict(VALIDATION, current_job_version=""),
+])
+async def test_validate_notification_targets_requires_a_usable_current_version(payload):
+    provider, _ = gateway(json_handler(payload))
+    with pytest.raises(ExternalSystemUnavailableError):
+        await provider.validate_notification_targets(
+            external_organization_id=ORG, external_job_id="job-1",
+            expected_job_version="v1", external_member_ids=["900001"],
+        )
+
+
+@pytest.mark.parametrize("job_id", ["..", ".", ""])
+async def test_a_job_identifier_that_cannot_be_a_path_segment_names_no_job(job_id):
+    # `quote()` leaves dot segments intact and the client then resolves them, so
+    # `/jobs/..` was sent to `/v1/orgs/{org}` - a different endpoint than the one
+    # the caller asked for.
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json=DETAIL)
+
+    provider, _ = gateway(handler)
+    with pytest.raises(ExternalJobNotFoundError):
+        await provider.get_job_detail(external_organization_id=ORG, external_job_id=job_id)
+    assert seen == [], "a request was sent for an unusable job identifier"
+
+
+@pytest.mark.parametrize("org", ["..", ".", ""])
+async def test_an_organization_identifier_that_cannot_be_a_path_segment_is_not_configured(org):
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json=DETAIL)
+
+    provider, _ = gateway(handler)
+    with pytest.raises(ExternalBusinessNotConfiguredError):
+        await provider.get_job_detail(external_organization_id=org, external_job_id="job-1")
+    assert seen == []
+
+
+def test_local_integration_also_receives_the_configured_provider(monkeypatch):
+    # APP_ENV=local with local integration mode is a valid combination, and it
+    # took a different composition branch that never saw the provider: the
+    # Internal API would read the external system while local integration read
+    # the Current DB.
+    monkeypatch.setattr("app.db.engine.get_engine", lambda: SimpleNamespace(name="engine"))
+    from app.main_admin import create_admin_app
+
+    settings = admin_settings_for(
+        monkeypatch,
+        app_env="local",
+        admin_local_integration_mode=True,
+        admin_local_integration_scopes={"service-a": ORG},
+        admin_external_business_base_url=BASE,
+    )
+    app = create_admin_app(settings)
+
+    internal = app.state.admin_internal_business_gateway
+    assert isinstance(internal, HttpExternalBusinessGateway)
+    assert app.state.admin_local_integration.external_business is internal
