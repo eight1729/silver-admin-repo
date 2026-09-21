@@ -8,7 +8,7 @@ from enum import Enum
 import hashlib
 import json
 import logging
-from typing import Callable
+from typing import Awaitable, Callable
 from uuid import UUID, uuid4, uuid5
 
 from app.domain.enums.enums import (
@@ -349,6 +349,7 @@ class NotificationService:
         external_business_organization_id_resolver: Callable[[str], str] | None = None,
         require_scoped_queue: bool = False,
         persist_line_subjects: bool = True,
+        reservation_guard: Callable[[str, int], Awaitable[None]] | None = None,
     ) -> None:
         self._repository = repository
         self._external_business_gateway = external_business_gateway
@@ -366,6 +367,7 @@ class NotificationService:
         )
         self._require_scoped_queue = require_scoped_queue
         self._persist_line_subjects = persist_line_subjects
+        self._reservation_guard = reservation_guard
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -1136,6 +1138,8 @@ class NotificationService:
 
         # Reserve the send atomically. The persistent adapter repeats the
         # duplicate check while holding the operation row lock.
+        if self._reservation_guard is not None:
+            await self._reservation_guard(command.service_id, sendable_count)
         try:
             updated, _stored_deliveries = await self._repository.begin_send_attempt(
                 command.service_id,

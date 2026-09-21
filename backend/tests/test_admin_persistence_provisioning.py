@@ -3,7 +3,7 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import Table
+from sqlalchemy import Table, create_engine, inspect
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from app.app_factory import configure_shared_infrastructure
@@ -20,6 +20,46 @@ EXPECTED_TABLES = (
     "admin_notification_audit_events",
     "admin_notification_outbox",
 )
+
+
+def test_fresh_provisioning_is_repeatable_and_scoped():
+    engine = create_engine("sqlite://")
+    try:
+        with engine.begin() as conn:
+            assert create_admin_notification_tables(conn) == EXPECTED_TABLES
+            assert create_admin_notification_tables(conn) == EXPECTED_TABLES
+            assert set(inspect(conn).get_table_names()) == set(EXPECTED_TABLES)
+            for table in ADMIN_NOTIFICATION_TABLES:
+                assert {c["name"] for c in inspect(conn).get_columns(table.name)} == set(table.c.keys())
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("existing", [(), ("lease_expires_at",), ("claim_token",),
+                                      ("lease_expires_at", "claim_token")])
+def test_provisioning_upgrades_partial_legacy_outbox_without_reset(existing):
+    engine = create_engine("sqlite://")
+    definitions = {"lease_expires_at": "DATETIME", "claim_token": "TEXT"}
+    try:
+        with engine.begin() as conn:
+            extra = "".join(f", {name} {definitions[name]}" for name in existing)
+            conn.exec_driver_sql("CREATE TABLE admin_notification_outbox "
+                "(command_id TEXT, idempotency_key TEXT, message_note TEXT, state TEXT" + extra + ")")
+            conn.exec_driver_sql("INSERT INTO admin_notification_outbox "
+                "(command_id, idempotency_key, message_note, state) VALUES ('command', 'key', 'body', 'delivering')")
+            for name in existing:
+                value = "2026-01-01 00:00:00" if name == "lease_expires_at" else "existing-token"
+                conn.exec_driver_sql(f"UPDATE admin_notification_outbox SET {name} = ?", (value,))
+            before = dict(conn.exec_driver_sql("SELECT * FROM admin_notification_outbox").mappings().one())
+            create_admin_notification_tables(conn)
+            create_admin_notification_tables(conn)
+            after = dict(conn.exec_driver_sql("SELECT * FROM admin_notification_outbox").mappings().one())
+            assert {k: after[k] for k in before} == before
+            assert all(after[name] is None for name in definitions if name not in existing)
+            columns = {c["name"]: c for c in inspect(conn).get_columns("admin_notification_outbox")}
+            assert all(columns[name]["nullable"] for name in definitions)
+    finally:
+        engine.dispose()
 
 
 def _error_app(error: Exception) -> FastAPI:

@@ -15,9 +15,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     </header>
     <aside className="demo-notice" aria-label="デモ環境について">
       <strong>{staging ? "準本番検証環境" : "ローカルデモ環境"}</strong>
-      <span>業務データはモックです。Fakeモードでは現在は実LINE通知を送信しません。現在のLINE送信モードは画面内に表示されます。Backend再起動で一時データが初期化されます。</span>
+      <span>現在のLINE送信モードと送信可否を画面内で確認してください。送信時にはBackendでも再検証されます。</span>
     </aside>
-    <AdminAuthBoundary><AdminEnvironmentProvider allowDemoReset={allowDemoReset}>
+    <AdminAuthBoundary required={process.env.APP_ENV === "production" || Boolean(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID?.trim())}><AdminEnvironmentProvider allowDemoReset={allowDemoReset}>
       {children}
     </AdminEnvironmentProvider></AdminAuthBoundary>
   </div>;

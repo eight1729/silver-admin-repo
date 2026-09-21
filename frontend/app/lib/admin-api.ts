@@ -13,7 +13,7 @@ export interface AdminOperation { operation_id: string; job_id: string; job_vers
 export interface AdminValidation { operation_id: string; status: OperationStatus; can_proceed: boolean; selected_count: number; sendable_count: number; skipped_count: number; reasons: string[]; version_changed: boolean; external_system_blocked: boolean }
 export interface AdminDelivery { delivery_id: string; member_id: string; status: DeliveryStatus; reason_code: string | null; created_at: string; sent_at: string | null; updated_at: string }
 export interface AdminDeliveries { items: AdminDelivery[]; summary: Record<DeliveryStatus, number> }
-export interface AdminLineSendMode { mode: "fake" | "staging_live"; max_recipients: number | null; message_prefix: string | null; live_send_enabled?: boolean | null; ready?: boolean | null; blocking_reasons?: string[] }
+export interface AdminLineSendMode { mode: "fake" | "disabled" | "staging_live" | "production_live" | "unavailable"; max_recipients: number | null; message_prefix: string | null; live_send_enabled?: boolean | null; ready?: boolean | null; blocking_reasons?: string[] }
 
 export class AdminApiError extends Error {
   constructor(public readonly status: number, public readonly code: string) { super(code); }

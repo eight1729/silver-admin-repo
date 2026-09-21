@@ -25,13 +25,15 @@ from app.adapter.current_db_external_business import (
 )
 from app.api import admin_internal_deps
 from app.api.routes.admin_internal import router
-from app.domain.enums.enums import MemberVerificationStatus as Status
+from app.domain.enums.enums import (
+    JobStatus, MemberVerificationStatus as Status, NotificationEligibilityReason as Reason,
+)
 from app.domain.errors.errors import (
     ExternalBusinessNotConfiguredError, ExternalJobNotFoundError,
     ExternalMemberNotFoundError, ExternalSystemUnavailableError,
 )
 from app.domain.models.external_business import (
-    ExternalJobDetail, ExternalJobSummary, MemberVerificationInput,
+    ExternalJobDetail, ExternalJobSummary, JobSearchQuery, MemberVerificationInput,
 )
 from app.domain.ports.external_business import ExternalBusinessGateway
 from app.domain.ports.organization_service_scope import OrganizationServiceScopeNotConfiguredError
@@ -157,6 +159,33 @@ async def test_recommendations_join_flags_and_all_three_scopes(db):
     assert await db[0].list_recommended_jobs(external_organization_id="org-a", external_member_id=str(M3)) == []
 
 
+@pytest.mark.parametrize("empty,page,page_size,expected_ids,total,has_next", [
+    (True, 1, 2, (), 0, False),
+    (False, 1, 10, (J4, J1, J3), 3, False),
+    (False, 1, 2, (J4, J1), 3, True),
+    (False, 2, 2, (J3,), 3, False),
+    (False, 3, 2, (), 3, False),
+])
+async def test_search_jobs_count_scope_and_pagination(db, empty, page, page_size, expected_ids, total, has_next):
+    gateway, engine, tables = db
+    if empty:
+        engine.connection.execute(tables["jobs"].delete())
+    else:
+        engine.connection.execute(tables["jobs"].update().where(tables["jobs"].c.id == J4)
+                                  .values(updated_at=NOW + timedelta(seconds=1)))
+
+    result = await gateway.search_jobs(
+        external_organization_id="org-a", query=JobSearchQuery(page=page, page_size=page_size),
+    )
+
+    assert result.total_count == total
+    assert tuple(job.external_job_id for job in result.items) == tuple(map(str, expected_ids))
+    assert all(isinstance(job, ExternalJobSummary) for job in result.items)
+    assert result.page == page and result.page_size == page_size
+    assert result.has_next is has_next
+    assert all(statement.is_select for statement in engine.statements)
+
+
 async def test_job_detail_mapping_and_revision(db):
     detail = await db[0].get_job_detail(external_organization_id="org-a", external_job_id=str(J1))
     assert isinstance(detail, ExternalJobDetail)
@@ -212,6 +241,73 @@ async def test_database_failure_is_not_no_match_and_has_no_details(db):
     with pytest.raises(ExternalSystemUnavailableError) as failure:
         await db[0].verify_member(external_organization_id="org-a", verification=MemberVerificationInput("0007", "Test Name"))
     assert "private" not in str(failure.value)
+
+
+@pytest.mark.parametrize("query,expected_ids", [
+    (JobSearchQuery(statuses=(JobStatus.PUBLISHED,)), (J1, J3)),
+    (JobSearchQuery(keyword=" place "), (J4, J1, J3)),
+    (JobSearchQuery(keyword="missing"), ()),
+    (JobSearchQuery(updated_from=NOW, updated_to=NOW), (J1, J3)),
+    (JobSearchQuery(updated_from=NOW + timedelta(seconds=1)), (J4,)),
+])
+async def test_search_filters_apply_to_items_and_count(db, query, expected_ids):
+    gateway, engine, tables = db
+    engine.connection.execute(tables["jobs"].update().where(tables["jobs"].c.id == J4)
+                              .values(updated_at=NOW + timedelta(seconds=1)))
+    result = await gateway.search_jobs(external_organization_id="org-a", query=query)
+    assert tuple(item.external_job_id for item in result.items) == tuple(map(str, expected_ids))
+    assert result.total_count == len(expected_ids)
+    assert all(statement.is_select for statement in engine.statements)
+
+
+@pytest.mark.parametrize("status,version,reason", [
+    ("published", NOW.isoformat(), None),
+    ("published", "stale-version", Reason.JOB_VERSION_CHANGED),
+    ("closed", NOW.isoformat(), Reason.JOB_CLOSED),
+    ("paused", NOW.isoformat(), Reason.JOB_PAUSED),
+    ("cancelled", NOW.isoformat(), Reason.JOB_CANCELLED),
+    ("draft", NOW.isoformat(), Reason.UNKNOWN),
+    ("unrecognized", NOW.isoformat(), Reason.UNKNOWN),
+])
+async def test_validation_job_status_version_and_member_scopes(db, status, version, reason):
+    gateway, engine, tables = db
+    engine.connection.execute(tables["jobs"].update().where(tables["jobs"].c.id == J1)
+                              .values(status=status))
+    result = await gateway.validate_notification_targets(
+        external_organization_id="org-a", external_job_id=str(J1),
+        expected_job_version=version, external_member_ids=[str(M1), str(M2), str(M3), "0007"],
+    )
+    assert result.job_reason_code is reason
+    assert result.job_eligible is (reason is None)
+    assert result.current_job_version == NOW.isoformat()
+    assert [m.eligible for m in result.members] == [reason is None, False, False, False]
+    assert [m.reason_code for m in result.members] == [None, Reason.MEMBER_NOT_FOUND,
+        Reason.MEMBER_NO_LONGER_CANDIDATE, Reason.MEMBER_NOT_FOUND]
+    detail = await gateway.get_job_detail(external_organization_id="org-a", external_job_id=str(J1))
+    assert detail.status is (JobStatus.UNKNOWN if status == "unrecognized" else JobStatus(status))
+    assert all(statement.is_select for statement in engine.statements)
+
+
+async def test_candidates_and_validation_follow_recommendation_changes(db):
+    gateway, engine, tables = db
+    candidates = await gateway.list_candidate_members(external_organization_id="org-a", external_job_id=str(J1))
+    assert [m.external_member_id for m in candidates] == [str(M1)]
+    # J3 has a false flag, a flag in another center, and a member in another center.
+    assert await gateway.list_candidate_members(external_organization_id="org-a", external_job_id=str(J3)) == []
+    engine.connection.execute(tables["job_recommendation_flags"].update()
+        .where(tables["job_recommendation_flags"].c.job_id == J1).values(is_recommended=False))
+    result = await gateway.validate_notification_targets(external_organization_id="org-a",
+        external_job_id=str(J1), expected_job_version=NOW.isoformat(), external_member_ids=[str(M1)])
+    assert result.job_eligible
+    assert not result.members[0].eligible
+    assert result.members[0].reason_code is Reason.MEMBER_NO_LONGER_CANDIDATE
+    assert await gateway.list_candidate_members(external_organization_id="org-a", external_job_id=str(J1)) == []
+    for job_id in (J2, UUID(int=999)):
+        result = await gateway.validate_notification_targets(external_organization_id="org-a",
+            external_job_id=str(job_id), expected_job_version=NOW.isoformat(), external_member_ids=[str(M1)])
+        assert not result.job_eligible and result.job_reason_code is Reason.JOB_NOT_FOUND
+        assert result.current_job_version == "" and result.members == ()
+    assert all(statement.is_select for statement in engine.statements)
 
 
 def test_complete_port_signatures():

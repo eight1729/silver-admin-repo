@@ -4,6 +4,8 @@ This module is distributable with the contract artifact and deliberately has
 no import from the LINE provider's private schema implementation.
 """
 
+from typing import Literal
+
 from datetime import datetime
 from enum import Enum
 from uuid import UUID
@@ -100,3 +102,22 @@ class StagingSendReadinessResponse(ContractModel):
     max_recipients: int
     message_prefix: str | None = None
     blocking_reasons: tuple[str, ...] = ()
+
+
+class SendCapabilityRequest(ContractModel):
+    scope: ServiceOrganizationScope
+
+
+class SendCapabilityResponse(ContractModel):
+    """Configuration readiness only; not a provider availability guarantee."""
+
+    mode: Literal["disabled", "staging_live", "production_live"]
+    live_send_enabled: bool = Field(strict=True)
+    ready: bool = Field(strict=True)
+    max_recipients: int | None = Field(gt=0, strict=True)
+    message_prefix: str | None = None
+    blocking_reasons: tuple[Literal[
+        "sending_disabled", "live_send_disabled", "allowlist_missing",
+        "invalid_max_recipients", "message_prefix_missing",
+        "access_token_missing", "liff_url_invalid",
+    ], ...] = ()

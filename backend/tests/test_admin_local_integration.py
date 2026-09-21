@@ -15,7 +15,7 @@ from app.api.admin_entry_deps import (
     get_admin_line_send_mode_for_runtime,
 )
 from app.api.admin_auth import get_staff_authenticator_http
-from app.contracts.admin_line_internal_v1 import StagingSendReadinessResponse
+from app.contracts.admin_line_internal_v1 import SendCapabilityResponse
 from app.application.admin_line_dispatch import (
     AdminLineOutboxDispatcher,
     AdminLineResultReconciler,
@@ -87,7 +87,7 @@ def _readiness_integration(*, ready=True, error=None):
     async def check(request):
         if error:
             raise error
-        return StagingSendReadinessResponse(
+        return SendCapabilityResponse(mode="staging_live",
             ready=ready, live_send_enabled=ready, max_recipients=1,
             message_prefix="【検証通知】", blocking_reasons=() if ready else ("live_send_disabled",),
         )
@@ -96,7 +96,7 @@ def _readiness_integration(*, ready=True, error=None):
             {"service-a": "organization-a"}
         ),
         boundary=SimpleNamespace(
-            client=SimpleNamespace(check_staging_send_readiness=check)
+            client=SimpleNamespace(check_send_capability=check)
         ),
     )
 
@@ -126,9 +126,9 @@ async def test_local_integration_readiness_failure_is_fail_closed():
         service_id="service-a",
     )
     assert mode == {
-        "mode": "staging_live", "max_recipients": None, "message_prefix": None,
+        "mode": "unavailable", "max_recipients": None, "message_prefix": None,
         "live_send_enabled": False, "ready": False,
-        "blocking_reasons": ("line_readiness_unavailable",),
+        "blocking_reasons": ("line_capability_unavailable",),
     }
 
 

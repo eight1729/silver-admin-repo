@@ -15,6 +15,8 @@ from app.contracts.admin_line_internal_v1 import (
     NotificationResult,
     StagingSendReadinessRequest,
     StagingSendReadinessResponse,
+    SendCapabilityRequest,
+    SendCapabilityResponse,
 )
 
 
@@ -85,6 +87,12 @@ class HttpLineInternalApiClient:
             "POST", "/internal/v1/staging-send-readiness:check",
             StagingSendReadinessResponse, expected_status=200,
             json=request.model_dump(mode="json"),
+        )
+
+    async def check_send_capability(self, request: SendCapabilityRequest) -> SendCapabilityResponse:
+        return await self._request(
+            "POST", "/internal/v1/send-capability:check", SendCapabilityResponse,
+            expected_status=200, json=request.model_dump(mode="json"),
         )
 
     async def _request(self, method, path, model, *, expected_status, json=None):

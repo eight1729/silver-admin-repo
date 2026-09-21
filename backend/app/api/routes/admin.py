@@ -67,12 +67,11 @@ async def get_line_send_mode(
     fallback_mode: dict = Depends(get_admin_line_send_mode_provider),
 ):
     runtime_settings = getattr(request.app.state, "admin_runtime_settings", None)
-    if runtime_settings is None or not runtime_settings.admin_local_integration_mode:
+    integration = getattr(request.app.state, "admin_runtime_composition", None) or getattr(request.app.state, "admin_local_integration", None)
+    if integration is None:
         return fallback_mode
     return await get_admin_line_send_mode_for_runtime(
-        runtime_settings, integration=getattr(
-            request.app.state, "admin_local_integration", None
-        ), service_id=staff.service_id,
+        runtime_settings, integration=integration, service_id=staff.service_id,
     )
 
 
