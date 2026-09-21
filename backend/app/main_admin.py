@@ -9,6 +9,27 @@ from app.core.settings_admin import AdminSettings, admin_settings
 from app.db.engine import configure_database_url
 
 
+def _external_business_from_settings(runtime_settings: AdminSettings, environment: str):
+    """Build the HTTP provider when a business API URL is configured, else None.
+
+    Returning None leaves both the Internal API and the production composition on
+    the Current DB Adapter, so behaviour is unchanged until the setting is added.
+    """
+    base_url = (runtime_settings.admin_external_business_base_url or "").strip()
+    if not base_url:
+        return None
+    from app.adapter.external_business_http import HttpExternalBusinessGateway
+    from app.services.http_client import get_client
+
+    return HttpExternalBusinessGateway(
+        # The shared client is closed by the app lifespan; a private one is not.
+        client=get_client(),
+        base_url=base_url,
+        audience=runtime_settings.admin_external_business_audience,
+        environment=environment,
+    )
+
+
 def _health_router() -> APIRouter:
     router = APIRouter()
     @router.get("/health", tags=["health"])
@@ -38,6 +59,16 @@ def create_admin_app(
         additional_allowed_headers=("X-Service-ID",),
     )
     app.state.admin_runtime_settings = runtime_settings
+    # Build the external business provider once and hand the same instance to
+    # both the Internal API (app.state) and the production composition. Wiring
+    # only one of them splits the app: staff screens would read one provider
+    # while the Internal API reads another. An explicitly injected gateway
+    # (tests) wins; otherwise it is built from settings.
+    injected_external_business = external_business_gateway is not None
+    if external_business_gateway is None:
+        external_business_gateway = _external_business_from_settings(
+            runtime_settings, environment
+        )
     app.state.admin_internal_business_gateway = external_business_gateway
     app.include_router(_health_router())
     app.include_router(admin_router)
@@ -61,7 +92,7 @@ def create_admin_app(
         app.dependency_overrides[get_admin_application_service] = (
             get_local_admin_application_service
         )
-    elif external_business_gateway is None and runtime_settings.notification_runner_service_ids:
+    elif not injected_external_business and runtime_settings.notification_runner_service_ids:
         # Canonical production-shaped composition. Runner ownership is a
         # dedicated setting, separate from Internal API authorization scopes.
         from app.runtime.admin_local_integration import build_admin_composition
@@ -75,6 +106,8 @@ def create_admin_app(
                     for service_id in runtime_settings.notification_runner_service_ids
                     if service_id in runtime_settings.admin_internal_api_scopes},
             runner_service_ids=runtime_settings.notification_runner_service_ids,
+            # None makes build_admin_composition fall back to the Current DB.
+            external_business=external_business_gateway,
         )
         app.state.admin_runtime_composition = composition
 

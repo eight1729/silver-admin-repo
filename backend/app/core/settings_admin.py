@@ -12,6 +12,10 @@ class AdminSettings(SharedSettings):
     current_db_business_centers: dict[str, str] = Field(default_factory=dict)
     admin_line_internal_api_base_url: str | None = None
     admin_line_internal_api_bearer_token: SecretStr | None = None
+    # External business API. Unset keeps the Current DB Adapter.
+    admin_external_business_base_url: str | None = None
+    # ID token audience. Unset uses the base URL.
+    admin_external_business_audience: str | None = None
     admin_oidc_enabled: bool = False
     admin_oidc_issuer: str | None = None
     admin_oidc_audience: str | None = None
