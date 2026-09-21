@@ -247,15 +247,16 @@ class HttpExternalBusinessGateway:
             json={"external_member_id": external_member_id},
             not_found=ExternalMemberNotFoundError,
         ))
-        # This Adapter does not compare the returned ID with the requested one:
-        # the provider normalizes member numbers and answers with its canonical
-        # ID. AdminInternalService.get_member_summary does require them to match,
-        # which holds because a canonical ID is a fixed point of that
-        # normalization, and any other answer is an inconsistent response there.
+        # The port defines this as the projection *of the requested member*, so a
+        # summary for anyone else is refused rather than returned: it would show
+        # one member's name in answer to a question about another.
+        # A provider that canonicalizes member numbers must therefore be given
+        # canonical IDs, which is what verify_member hands back.
+        returned = _required_text(body.get("external_member_id"), "member identifier")
+        if returned != external_member_id:
+            raise _unavailable("a summary for a different member")
         return ExternalMemberSummary(
-            external_member_id=_required_text(
-                body.get("external_member_id"), "member identifier"
-            ),
+            external_member_id=returned,
             display_label=_optional_text(body.get("display_label")),
         )
 
@@ -345,7 +346,13 @@ class HttpExternalBusinessGateway:
         )
         if not isinstance(body, list):
             raise _unavailable("an invalid candidate list")
-        return [self._candidate(_object(item)) for item in body]
+        rows = [self._candidate(_object(item)) for item in body]
+        # NotificationService keys candidates by member ID as well, so a repeated
+        # member silently wins here too: an ineligible row followed by an
+        # eligible one would make a member who must not be contacted a target.
+        if len({row.external_member_id for row in rows}) != len(rows):
+            raise _unavailable("a duplicate candidate row")
+        return rows
 
     async def validate_notification_targets(
         self,
@@ -569,6 +576,13 @@ class HttpExternalBusinessGateway:
         if not value or value != value.strip():
             raise ExternalBusinessNotConfiguredError(
                 "external business base URL is not configured"
+            )
+        # A URL cannot contain raw whitespace or control characters, and neither
+        # urlsplit nor httpx.URL rejects them: "https://bad host" would survive
+        # configuration and fail later as an apparent outage.
+        if any(character.isspace() or ord(character) < 0x20 for character in value):
+            raise ExternalBusinessNotConfiguredError(
+                "external business base URL is invalid"
             )
         try:
             parsed = urlsplit(value)

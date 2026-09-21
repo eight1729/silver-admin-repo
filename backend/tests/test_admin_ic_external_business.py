@@ -730,3 +730,82 @@ def test_local_integration_also_receives_the_configured_provider(monkeypatch):
     internal = app.state.admin_internal_business_gateway
     assert isinstance(internal, HttpExternalBusinessGateway)
     assert app.state.admin_local_integration.external_business is internal
+
+
+# ---------------------------------------------------------------------------
+# Second review round (2026-09-21)
+# ---------------------------------------------------------------------------
+async def test_list_candidate_members_rejects_a_duplicated_member():
+    # The same last-wins hazard as the validation rows, on the sibling path:
+    # NotificationService keys candidates by member ID too.
+    provider, _ = gateway(json_handler([
+        {"external_member_id": "900001", "display_label": "A", "eligible": False,
+         "reason_codes": ["member_inactive"], "match_rank": 1},
+        {"external_member_id": "900001", "display_label": "A", "eligible": True,
+         "reason_codes": [], "match_rank": 2},
+    ]))
+    with pytest.raises(ExternalSystemUnavailableError):
+        await provider.list_candidate_members(
+            external_organization_id=ORG, external_job_id="job-1"
+        )
+
+
+async def test_get_member_summary_rejects_a_summary_for_another_member():
+    # The port defines this as the projection of the *requested* member. Showing
+    # 900002's name in answer to a question about 900001 is a wrong answer about
+    # a person, not a missing one.
+    provider, _ = gateway(json_handler(
+        {"external_member_id": "900002", "display_label": "Someone else"}
+    ))
+    with pytest.raises(ExternalSystemUnavailableError):
+        await provider.get_member_summary(
+            external_organization_id=ORG, external_member_id="900001"
+        )
+
+
+@pytest.mark.parametrize("call", [
+    "get_job_detail", "list_candidate_members", "validate_notification_targets",
+])
+async def test_every_job_path_refuses_an_unusable_job_identifier(call):
+    # Reverting any one path to the organization-flavoured escape would otherwise
+    # go unnoticed: only get_job_detail was covered.
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json=DETAIL)
+
+    provider, _ = gateway(handler)
+    kwargs = {"external_organization_id": ORG, "external_job_id": ".."}
+    if call == "validate_notification_targets":
+        kwargs |= {"expected_job_version": "v1", "external_member_ids": []}
+    with pytest.raises(ExternalJobNotFoundError):
+        await getattr(provider, call)(**kwargs)
+    assert seen == []
+
+
+@pytest.mark.parametrize("payload", [
+    dict(VALIDATION, job_eligible=False, job_reason_code="job_closed",
+         current_job_version=None, members=[]),
+    dict(VALIDATION, job_eligible=False, job_reason_code="job_closed",
+         current_job_version=1, members=[]),
+])
+async def test_the_current_version_is_typed_even_when_the_job_is_not_eligible(payload):
+    # The empty-string allowance applies only to an absent job; it is not a
+    # licence to accept a missing or non-string field whenever eligible is false.
+    provider, _ = gateway(json_handler(payload))
+    with pytest.raises(ExternalSystemUnavailableError):
+        await provider.validate_notification_targets(
+            external_organization_id=ORG, external_job_id="job-1",
+            expected_job_version="v1", external_member_ids=[],
+        )
+
+
+@pytest.mark.parametrize("value", [
+    "https://bad host", "https://host\tname", "https://host\nname",
+])
+def test_a_base_url_with_whitespace_fails_at_configuration_time(value):
+    # Neither urlsplit nor httpx.URL rejects these, so without this check a typo
+    # in configuration would surface much later as an apparent outage.
+    with pytest.raises(ExternalBusinessNotConfiguredError):
+        HttpExternalBusinessGateway(client=httpx.AsyncClient(), base_url=value)
