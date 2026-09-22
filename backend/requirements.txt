@@ -5,4 +5,10 @@ sqlalchemy[asyncio]>=2.0
 psycopg[binary]
 pydantic-settings
 httpx
+# Calls the external business API with a Cloud Run ID token
+# (app/adapter/external_business_http.py).
+google-auth
+# google.auth.transport.requests raises ImportError without requests, which
+# google-auth does not depend on itself.
+requests
 PyJWT[crypto]>=2.8
