@@ -120,10 +120,6 @@ class AdminDeliveriesResponse(BaseModel):
     summary: AdminDeliverySummary
 
 
-class AdminResetResponse(BaseModel):
-    reset: bool
-
-
 class AdminLineSendModeResponse(BaseModel):
     mode: str
     max_recipients: int | None

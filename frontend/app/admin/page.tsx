@@ -9,7 +9,6 @@ import {
   type AdminLineSendMode, type AdminOperation, type AdminValidation, type NotificationType,
 } from "../lib/admin-api";
 import { ADMIN_HOME_EVENT } from "./AdminHomeButton";
-import { useAdminEnvironment } from "./AdminEnvironment";
 import { clearedTransientAdminState, createOrSaveTargets, reloadDeliveryResults, restoreAdminOperation, saveThenValidate, sendThenLoadDeliveries } from "./admin-workflow";
 import { AdminPanel } from "./AdminPanel";
 import { AdminShell } from "./AdminShell";
@@ -32,7 +31,6 @@ const initialMessage: AdminMessage = {
 };
 
 export default function AdminPage() {
-  const { allowDemoReset } = useAdminEnvironment();
   const [step, setStep] = useState<Step>("jobs");
   const [jobs, setJobs] = useState<AdminJobSummary[]>([]);
   const [job, setJob] = useState<AdminJobDetail | null>(null);
@@ -67,7 +65,6 @@ export default function AdminPage() {
   const [templateGeneratedMessage, setTemplateGeneratedMessage] = useState<AdminMessage | null>(null);
   const [pendingTemplate, setPendingTemplate] = useState<SelectedTemplateId | null>(null);
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
-  const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
   const [centerDisplayName, setCenterDisplayName] = useState(DEFAULT_CENTER_DISPLAY_NAME);
   const [centerDisplayNameDraft, setCenterDisplayNameDraft] = useState(DEFAULT_CENTER_DISPLAY_NAME);
   const [noticeDraft, setNoticeDraft] = useState(initialMessage.note);
@@ -440,28 +437,12 @@ export default function AdminPage() {
     } finally { setDeliveriesLoading(false); }
   }
 
-  async function reset() {
-    if (busy) return;
-    setResetConfirmationOpen(false);
-    setBusy(true); clearFeedback();
-    try {
-      await adminApi.reset(); sessionStorage.removeItem(STORAGE_KEY); sessionStorage.removeItem(SELECTED_KEY);
-      setOperation(null); setValidation(null); setDeliveries(null); setJob(null); setCandidates([]); setSelected(new Set()); setMessage(initialMessage); setTargetsPending(false); setDeliveriesError(""); setQueueFailure(false); setStep("jobs");
-      setSelectedTemplate("standard"); setTemplateGeneratedMessage(null); setCenterDisplayName(DEFAULT_CENTER_DISPLAY_NAME); setCenterDisplayNameDraft(DEFAULT_CENTER_DISPLAY_NAME);
-      setDeliveriesOperationId(null); setSessionHistory([]);
-      workflowLock.current = false; setValidationSnapshot(null); setValidationInvalidation(null); setWorkflowAction("idle"); notificationLinkRef.current = null; setNotificationLink(null);
-      await loadJobs(); setSuccess("デモデータをリセットしました。");
-    } catch (e) { showError(e); }
-    finally { setBusy(false); }
-  }
-
   function recordSessionEvent(operationId: string, name: string, status: string, description: string) {
     const event: SessionHistoryEvent = { id: `session-${++historySequence.current}`, operationId, jobName: job?.title ?? "求人名を取得できません", name, status, occurredAt: new Date().toISOString(), description };
     setSessionHistory((current) => [event, ...current].slice(0, 10));
   }
 
   return <AdminShell mode={lineSendMode}><main className="admin-main">
-    {allowDemoReset && <div className="admin-toolbar-actions"><button className="admin-button danger" onClick={() => setResetConfirmationOpen(true)} disabled={busy}>デモデータをリセット</button></div>}
     <div className="sr-status" aria-live="polite">{loading || busy ? "処理中です…" : ""}</div>
     {error && <div className="admin-error" role="alert">{error}</div>}
     {success && <div className="admin-success" role="status">{success}</div>}
@@ -494,7 +475,6 @@ export default function AdminPage() {
     </div>
     {pendingTemplate && <Modal title="通知テンプレートを変更しますか？" onClose={() => setPendingTemplate(null)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setPendingTemplate(null)}>キャンセル</button><button className="admin-button" type="button" onClick={() => commitTemplate(pendingTemplate)}>テンプレートを適用</button></>}><p>現在の通知本文は、選択したテンプレートの内容で置き換えられます。</p></Modal>}
     {pendingJobId && <Modal title="求人を変更しますか？" onClose={() => setPendingJobId(null)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setPendingJobId(null)}>キャンセル</button><button className="admin-button danger" type="button" onClick={() => void switchToJob(pendingJobId)}>求人を変更する</button></>}><p>求人を変更すると、現在の通知本文、対象会員、検証結果は破棄されます。保存済みの旧通知履歴は削除されません。</p></Modal>}
-    {resetConfirmationOpen && <Modal title="デモデータをリセットしますか？" onClose={() => setResetConfirmationOpen(false)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setResetConfirmationOpen(false)}>キャンセル</button><button className="admin-button danger" type="button" onClick={() => void reset()}>リセットする</button></>}><p>通知operation、対象者、送信結果、監査履歴を消去します。fixture求人は残ります。</p></Modal>}
   </main></AdminShell>;
 }
 

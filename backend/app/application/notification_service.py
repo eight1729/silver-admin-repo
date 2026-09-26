@@ -172,11 +172,6 @@ class NotificationOperationResult:
 
 
 @dataclass(frozen=True, slots=True)
-class ResetDemoDataResult:
-    reset: bool
-
-
-@dataclass(frozen=True, slots=True)
 class NotificationTargetValidationItem:
     member_id: str
     selected: bool
@@ -1172,7 +1167,3 @@ class NotificationService:
         self, service_id: str, operation_id: UUID
     ) -> tuple[NotificationDeliveryRecord, ...]:
         return await self._repository.get_deliveries(service_id, operation_id)
-
-    async def reset_demo_data(self) -> ResetDemoDataResult:
-        await self._repository.reset()
-        return ResetDemoDataResult(reset=True)

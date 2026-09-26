@@ -13,7 +13,6 @@ from app.application.notification_service import (
     NotificationTargetInput,
     OperationNotSendableError,
     ReplaceNotificationTargetsCommand,
-    ResetDemoDataResult,
     SendNotificationOperationCommand,
     UpdateNotificationDraftCommand,
     ValidateNotificationOperationCommand,
@@ -94,7 +93,6 @@ class AdminApplicationService:
         external_business_gateway: ExternalBusinessGateway,
         demo_service_id: str | None,
         line_linked_member_ids: frozenset[str],
-        reset_callbacks: tuple[Callable[[], None], ...] = (),
         expose_line_subjects: bool = True,
         line_internal_client=None,
         organization_id_resolver: Callable[[str], str] | None = None,
@@ -105,7 +103,6 @@ class AdminApplicationService:
         self._external = external_business_gateway
         self._demo_service_id = demo_service_id
         self._line_linked = line_linked_member_ids
-        self._reset_callbacks = reset_callbacks
         self._expose_line_subjects = expose_line_subjects
         self._line_internal_client = line_internal_client
         self._organization_id_resolver = organization_id_resolver
@@ -345,10 +342,3 @@ class AdminApplicationService:
     async def list_deliveries(self, service_id: str, operation_id: UUID):
         await self.notification_service.get_operation(service_id, operation_id)
         return await self.notification_service.list_deliveries(service_id, operation_id)
-
-    async def reset(self, service_id: str) -> ResetDemoDataResult:
-        self._check_service(service_id)
-        result = await self.notification_service.reset_demo_data()
-        for callback in self._reset_callbacks:
-            callback()
-        return result

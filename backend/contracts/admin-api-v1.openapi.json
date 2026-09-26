@@ -593,19 +593,6 @@
         "title": "AdminOperationUpdateRequest",
         "type": "object"
       },
-      "AdminResetResponse": {
-        "properties": {
-          "reset": {
-            "title": "Reset",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "reset"
-        ],
-        "title": "AdminResetResponse",
-        "type": "object"
-      },
       "AdminTargetsUpdateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -785,60 +772,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/admin/demo/reset": {
-      "post": {
-        "operationId": "reset_demo_admin_demo_reset_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-Service-ID",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Service-Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminResetResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Reset Demo",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
     "/admin/jobs": {
       "get": {
         "operationId": "list_jobs_admin_jobs_get",

@@ -7,7 +7,6 @@
 .admin-main{max-width:1120px;margin:auto;padding:2rem 1rem 4rem}
 .admin-toolbar,.admin-actions{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
 .admin-toolbar{justify-content:space-between;margin-bottom:1.5rem}
-.admin-toolbar-actions{display:flex;justify-content:flex-end;margin-bottom:.5rem}
 .admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem}
 .admin-card{background:#fff;border:1px solid #dce3df;border-radius:14px;padding:1.25rem;overflow-wrap:anywhere}
 .admin-card h2,.admin-card h3{margin-top:0}

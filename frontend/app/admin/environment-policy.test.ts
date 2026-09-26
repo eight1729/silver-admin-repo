@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
-  allowsDemoReset,
   isStagingEnvironment,
 } from "../lib/environment-policy.ts";
 import {
@@ -12,22 +11,13 @@ import {
   getBlockingReasonMessage,
 } from "./blocking-reasons.ts";
 
-test("demo-capable environments enable reset and staging receives its own presentation", () => {
-  assert.deepEqual(
-    ["local", "development", "demo", "staging", "production", "unknown", undefined].map(
-      (environment) => allowsDemoReset(environment),
-    ),
-    [true, true, true, false, false, false, false],
-  );
+test("staging environment detection normalizes the value", () => {
   assert.equal(isStagingEnvironment(" staging "), true);
   assert.equal(isStagingEnvironment("demo"), false);
 });
 
-test("staging omits the reset control and uses verification copy", async () => {
-  const page = await readFile(new URL("./page.tsx", import.meta.url), "utf8");
+test("staging uses verification copy", async () => {
   const layout = await readFile(new URL("./layout.tsx", import.meta.url), "utf8");
-  assert.match(page, /allowDemoReset\s*&&\s*<div/);
-  assert.match(page, />デモデータをリセット<\/button>/);
   assert.match(layout, /準本番検証環境/);
   assert.match(layout, /現在のLINE送信モードと送信可否を画面内で確認/);
   assert.match(layout, /送信時にはBackendでも再検証/);

@@ -73,7 +73,6 @@ export const adminApi = {
   validate: (id: string) => request<AdminValidation>(`/admin/notification-operations/${encodeURIComponent(id)}/validate`, { method: "POST" }),
   send: (id: string) => request<AdminOperation>(`/admin/notification-operations/${encodeURIComponent(id)}/send`, { method: "POST" }),
   deliveries: (id: string, signal?: AbortSignal) => request<AdminDeliveries>(`/admin/notification-operations/${encodeURIComponent(id)}/deliveries`, {}, signal),
-  reset: () => request<{ reset: boolean }>("/admin/demo/reset", { method: "POST" }),
 };
 
 export function adminErrorMessage(error: unknown): string {

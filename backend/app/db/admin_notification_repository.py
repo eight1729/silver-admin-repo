@@ -773,12 +773,3 @@ class SqlAlchemyAdminNotificationRepository:
             audit_id=UUID(row["audit_id"]), operation_id=UUID(row["operation_id"]),
             event_type=row["event_type"], staff_id=row["staff_id"], details=row["details"], created_at=_loaded_utc(row["created_at"]),
         ) for row in rows)
-
-    async def reset(self) -> None:
-        """Test/demo convenience; not part of the production repository port."""
-        async with self._engine.begin() as conn:
-            await conn.execute(delete(admin_notification_outbox))
-            await conn.execute(delete(admin_notification_audit_events))
-            await conn.execute(delete(admin_notification_deliveries))
-            await conn.execute(delete(admin_notification_targets))
-            await conn.execute(delete(admin_notification_operations))
