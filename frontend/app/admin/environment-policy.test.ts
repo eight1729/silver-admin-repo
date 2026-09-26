@@ -120,9 +120,8 @@ test("blocked reason formatting deduplicates reasons and hides unknown codes", (
   assert.doesNotMatch(getBlockingReasonMessage(unknownCode), new RegExp(unknownCode));
 });
 
-test("blocked reasons are hidden for empty, fake, and live ready modes", () => {
+test("blocked reasons are hidden for empty and live ready modes", () => {
   assert.deepEqual(formatBlockingReasons({ mode: "staging_live", max_recipients: 1, message_prefix: null, ready: false, blocking_reasons: [] }), []);
-  assert.deepEqual(formatBlockingReasons({ mode: "fake", max_recipients: null, message_prefix: null, ready: false, blocking_reasons: ["allowlist_missing"] }), [blockingReasonMessages.allowlist_missing]);
   assert.deepEqual(formatBlockingReasons({ mode: "staging_live", max_recipients: 1, message_prefix: "configured", ready: true, blocking_reasons: ["allowlist_missing"] }), []);
 });
 

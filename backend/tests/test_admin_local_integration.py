@@ -72,9 +72,9 @@ def test_default_local_keeps_compatibility_dependency():
 
 
 @pytest.mark.asyncio
-async def test_default_local_keeps_fake_send_mode(monkeypatch):
+async def test_default_local_keeps_unavailable_send_mode(monkeypatch):
     expected = {
-        "mode": "fake", "max_recipients": None, "message_prefix": None,
+        "mode": "unavailable", "max_recipients": None, "message_prefix": None,
         "live_send_enabled": False, "ready": False, "blocking_reasons": (),
     }
     monkeypatch.setattr(

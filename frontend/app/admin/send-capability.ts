@@ -6,7 +6,7 @@ export function isLiveMode(mode: AdminLineSendMode | null) {
 
 export function canAttemptSend(mode: AdminLineSendMode | null, sendableCount = 0) {
   if (!mode || mode.ready !== true || mode.blocking_reasons?.length) return false;
-  if (mode.mode !== "fake" && (!isLiveMode(mode) || mode.live_send_enabled !== true)) return false;
+  if (!isLiveMode(mode) || mode.live_send_enabled !== true) return false;
   return mode.max_recipients == null || sendableCount <= mode.max_recipients;
 }
 
@@ -15,7 +15,6 @@ export function safetyPrefix(mode: AdminLineSendMode | null) {
 }
 
 export function modePresentation(mode: AdminLineSendMode | null) {
-  if (mode?.mode === "fake") return { label: "Fake", detail: "実LINE送信なし", tone: "fake" };
   if (mode?.mode === "disabled") return { label: "LINE送信は無効", detail: "実LINE送信は行いません", tone: "blocked" };
   if (!mode || mode.mode === "unavailable") return { label: "LINE送信状態を確認できません", detail: "状態を確認できないため送信不可", tone: "blocked" };
   if (!canAttemptSend(mode)) return { label: "LINE送信設定未完了", detail: "現在は送信できません", tone: "blocked" };

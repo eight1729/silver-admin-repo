@@ -34,7 +34,7 @@ const { createElement } = require("react");
 const { renderToStaticMarkup } = require("react-dom/server");
 
 for (const [mode, ready, allowed, label] of [
-  ["fake", true, true, "Fake"], ["disabled", false, false, "LINE送信は無効"],
+  ["disabled", false, false, "LINE送信は無効"],
   ["staging_live", true, true, "限定実LINE送信"], ["staging_live", false, false, "LINE送信設定未完了"],
   ["production_live", true, true, "実LINE送信"], ["production_live", false, false, "LINE送信設定未完了"],
   ["unavailable", false, false, "LINE送信状態を確認できません"],
@@ -44,7 +44,7 @@ for (const [mode, ready, allowed, label] of [
     assert.equal(canAttemptSend(value, 1), allowed);
     assert.equal(modePresentation(value).label, label);
     assert.ok(sendWarning(value).includes(label));
-    if (mode !== "fake") assert.doesNotMatch(sendWarning(value), /Fake/);
+    assert.doesNotMatch(sendWarning(value), /Fake/);
     if (mode === "production_live") assert.doesNotMatch(sendWarning(value), /検証|送信なし|送信は行いません/);
     const html = renderToStaticMarkup(createElement(SendConfirmationPanel, {
       operation: { selected_count: 1 }, validation: { can_proceed: true, sendable_count: 1, reasons: [] },
@@ -57,7 +57,7 @@ for (const [mode, ready, allowed, label] of [
     const sendButton = html.match(/<button[^>]*class="admin-button send-primary compact-send-primary"[^>]*>/)?.[0];
     assert.ok(sendButton);
     assert.equal(sendButton.includes("disabled"), !allowed);
-    if (mode !== "fake") assert.doesNotMatch(html, /Fake/);
+    assert.doesNotMatch(html, /Fake/);
   });
 }
 

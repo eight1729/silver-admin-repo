@@ -60,7 +60,6 @@
 .admin-mode-mark{width:.65rem;height:.65rem;border-radius:50%;background:#6a7b73}
 .admin-mode--ready .admin-mode-mark{background:#237a53}
 .admin-mode--blocked .admin-mode-mark{background:#b24837}
-.admin-mode--fake .admin-mode-mark{background:#9a681b}
 .admin-menu-toggle{display:none;border:1px solid #9db0a7;border-radius:8px;background:#fff;color:#1d2925;padding:.55rem;font-size:1.15rem;cursor:pointer}
 .admin-app-body{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:calc(100vh - 76px)}
 .admin-sidebar{position:sticky;top:76px;align-self:start;height:calc(100vh - 76px);padding:1.2rem .8rem;background:#173f34}
