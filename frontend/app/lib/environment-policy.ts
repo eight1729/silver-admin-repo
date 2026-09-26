@@ -18,11 +18,6 @@ export function isStagingEnvironment(value: string | undefined): boolean {
   return normalizedAppEnvironment(value) === "staging";
 }
 
-export function requiresLiffAuthentication(value: string | undefined): boolean {
-  const environment = normalizedAppEnvironment(value);
-  return environment === "staging" || environment === "production";
-}
-
 export function allowsDemoReset(value: string | undefined): boolean {
   const environment = normalizedAppEnvironment(value);
   return (

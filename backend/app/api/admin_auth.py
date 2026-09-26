@@ -15,17 +15,6 @@ from app.domain.ports.staff_auth import StaffAuthenticator
 _bearer = HTTPBearer(auto_error=False)
 
 
-def get_staff_authenticator() -> StaffAuthenticator:
-    """Compatibility helper for tests and integrated non-production runtime."""
-    if admin_settings.app_env.strip().lower() not in {
-        "local", "development", "demo", "staging", "test"
-    }:
-        from app.domain.errors.errors import AuthenticatorNotConfiguredError
-        raise AuthenticatorNotConfiguredError("staff authenticator is not configured")
-    from app.adapter.staff_auth import DemoStaffAuthenticator
-    return DemoStaffAuthenticator()
-
-
 def get_admin_runtime_settings() -> AdminSettings:
     return admin_settings
 
