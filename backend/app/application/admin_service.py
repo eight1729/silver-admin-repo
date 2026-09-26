@@ -100,7 +100,6 @@ class AdminApplicationService:
         organization_id_resolver: Callable[[str], str] | None = None,
         external_business_organization_id_resolver: Callable[[str], str] | None = None,
         scope_resolver: OrganizationServiceScopeResolver | None = None,
-        legacy_notification_link_resolver: Callable[[str], str] | None = None,
     ) -> None:
         self.notification_service = notification_service
         self._external = external_business_gateway
@@ -115,7 +114,6 @@ class AdminApplicationService:
             or organization_id_resolver
         )
         self._scope_resolver = scope_resolver
-        self._legacy_notification_link_resolver = legacy_notification_link_resolver
 
     def _check_service(self, service_id: str) -> None:
         if self._scope_resolver is not None:
@@ -225,8 +223,6 @@ class AdminApplicationService:
                 LiffDeepLinkRequest(scope=self._line_scope(service_id), job_id=job_id)
             )
             return str(result.canonical_deep_link)
-        if self._legacy_notification_link_resolver is not None:
-            return self._legacy_notification_link_resolver(job_id)
         raise AdminDependencyUnavailableError("LINE deep-link service is unavailable")
 
     async def create_operation(
