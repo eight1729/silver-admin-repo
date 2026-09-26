@@ -96,7 +96,6 @@ def build_production_admin_application(
     notifications = NotificationService(
         repository=boundary.repository,
         external_business_gateway=external_business_gateway,
-        line_sender=None,
         queue_gateway=queue_gateway,
         organization_id_resolver=organization,
         external_business_organization_id_resolver=organization,

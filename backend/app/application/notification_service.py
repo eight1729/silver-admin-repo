@@ -21,20 +21,10 @@ from app.domain.enums.notification_type import NotificationType
 from app.domain.errors.errors import (
     ExternalJobNotFoundError,
     ExternalSystemUnavailableError,
-    LineAuthenticationError,
-    LineBadRequestError,
-    LineConfigurationError,
-    LineRateLimitError,
-    LineRecipientUnavailableError,
-    LineSendError,
-    LineTemporaryError,
-    LineUnknownResultError,
     QueueError,
 )
-from app.domain.models.messaging import JobNotificationMessage
 from app.domain.models.notification import NotificationValidationResult
 from app.domain.ports.external_business import ExternalBusinessGateway
-from app.domain.ports import LineMessageGateway
 from app.domain.ports.queue import QueueGateway
 from app.domain.errors.admin_notification_repository import (
     SendAttemptAlreadyExistsError,
@@ -172,15 +162,6 @@ class SendNotificationOperationCommand:
     request_id: str
 
 
-@dataclass(frozen=True, slots=True)
-class ProcessNotificationOperationCommand:
-    """Command issued by the queue handler to process pending deliveries."""
-
-    service_id: str
-    operation_id: UUID
-    request_id: str
-
-
 # ── Result types ──────────────────────────────────────────────────────────────
 
 
@@ -292,36 +273,6 @@ def _validation_snapshot(summary: NotificationValidationSummary) -> dict:
     }
 
 
-def _map_line_exception(exc: LineSendError) -> tuple[DeliveryStatus, str, str]:
-    """Map a LineSendError subclass to (delivery_status, error_code, sanitised_message).
-
-    The returned error_message is a generic string; it never contains the raw
-    exception text, LINE response body, or any PII.
-    """
-    if isinstance(exc, (LineAuthenticationError, LineConfigurationError)):
-        return (
-            DeliveryStatus.FAILED,
-            "line_authentication_error",
-            "LINE authentication failed",
-        )
-    if isinstance(exc, LineRecipientUnavailableError):
-        return (
-            DeliveryStatus.FAILED,
-            "recipient_unavailable",
-            "LINE recipient unavailable",
-        )
-    if isinstance(exc, LineRateLimitError):
-        return DeliveryStatus.FAILED, "line_rate_limited", "LINE rate limit exceeded"
-    if isinstance(exc, LineTemporaryError):
-        return DeliveryStatus.FAILED, "line_temporary_error", "LINE temporary error"
-    if isinstance(exc, LineBadRequestError):
-        return DeliveryStatus.FAILED, "line_bad_request", "LINE bad request error"
-    if isinstance(exc, LineUnknownResultError):
-        return DeliveryStatus.UNKNOWN, "line_unknown_result", "LINE result unknown"
-    # Catch-all for any other LineSendError subclass
-    return DeliveryStatus.FAILED, "line_send_error", "LINE send error"
-
-
 # ── Service ───────────────────────────────────────────────────────────────────
 
 
@@ -333,7 +284,6 @@ class NotificationService:
         *,
         repository: AdminNotificationRepository,
         external_business_gateway: ExternalBusinessGateway | None = None,
-        line_sender: LineMessageGateway | None = None,
         queue_gateway: QueueGateway | None = None,
         clock: Callable[[], datetime] | None = None,
         uuid_factory: Callable[[], UUID] | None = None,
@@ -341,10 +291,6 @@ class NotificationService:
             Callable[[NotificationOperationResult, NotificationValidationSummary], None]
             | None
         ) = None,
-        message_factory: (
-            Callable[[NotificationOperationRecord], JobNotificationMessage] | None
-        ) = None,
-        line_subject_resolver: Callable[[str, str], str] | None = None,
         organization_id_resolver: Callable[[str], str] | None = None,
         external_business_organization_id_resolver: Callable[[str], str] | None = None,
         require_scoped_queue: bool = False,
@@ -353,13 +299,10 @@ class NotificationService:
     ) -> None:
         self._repository = repository
         self._external_business_gateway = external_business_gateway
-        self._line_sender = line_sender
         self._queue_gateway = queue_gateway
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._uuid_factory = uuid_factory or uuid4
         self._pre_send_guard = pre_send_guard
-        self._message_factory = message_factory
-        self._line_subject_resolver = line_subject_resolver
         self._organization_id_resolver = organization_id_resolver
         self._external_business_organization_id_resolver = (
             external_business_organization_id_resolver
@@ -933,8 +876,8 @@ class NotificationService:
            deliveries for SKIP-disposition targets.
         6. Persist deliveries and set send_requested_at on the operation.
         7. Audit send_requested.
-        8. Enqueue the operation. In inline mode the queue handler immediately
-           calls process_operation. If enqueue fails, durable intent remains
+        8. Enqueue the operation for the configured dispatcher.
+           If enqueue fails, durable intent remains
            accepted and the operation is left READY (not SENDING).
         """
         _required(command.service_id, "service_id")
