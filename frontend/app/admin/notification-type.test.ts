@@ -10,11 +10,13 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createOrSaveTargets, restoreAdminOperation } from "./admin-workflow.ts";
 import type { AdminOperation, NotificationType } from "../lib/admin-api.ts";
+import { toggleCandidateSelection } from "./candidate-selection.ts";
 
 const require = createRequire(import.meta.url);
 const root = dirname(fileURLToPath(import.meta.url));
 const page = readFileSync(resolve(root, "page.tsx"), "utf8");
 const types: NotificationType[] = ["new_job_match", "existing_job_match", "custom_job"];
+let candidatePage = 1;
 // Execute actual TSX with inert hooks; no Next server, env files, or network.
 function load(path: string): Record<string, unknown> {
   const code = ts.transpileModule(readFileSync(path, "utf8"), { compilerOptions: {
@@ -22,7 +24,7 @@ function load(path: string): Record<string, unknown> {
   } }).outputText;
   const module = { exports: {} };
   runInNewContext(code, { module, exports: module.exports, require: (id: string) => {
-    if (id === "react") return { ...React, useState: (value: unknown) => [value, () => {}], useEffect: () => {} };
+    if (id === "react") return { ...React, useState: (value: unknown) => [typeof value === "number" ? candidatePage : value, () => {}], useEffect: () => {} };
     if (!id.startsWith(".")) return require(id);
     const base = resolve(dirname(path), id);
     return load(existsSync(base + ".ts") ? base + ".ts" : base + ".tsx");
@@ -128,4 +130,49 @@ test("page wiring always prefers persisted type across workflow steps and restor
   assert.match(page, /setOperation\(op\); setMessage\(op\.message\); setNotificationType\(op\.notification_type\)/);
   assert.match(page, /notification_type: notificationType/);
   assert.match(page, /sessionStorage\.getItem\(STORAGE_KEY\)/);
+});
+
+test("candidate checkboxes preserve multiple selection across pages and filters and enforce finite limits", () => {
+  const Component = panels.CandidateSelectionPanel as (props: Record<string, unknown>) => React.ReactNode;
+  let selected = new Set<string>();
+  let maxRecipients: number | null = null;
+  const candidates = Array.from({ length: 7 }, (_, index) => ({ member_id: `M${index}`, display_name: `Member ${index}`,
+    eligible: true, line_linked: index !== 0, preference_summary: "" }));
+  function inputs(node: React.ReactNode): React.ReactElement<Record<string, unknown>>[] {
+    return React.Children.toArray(node).flatMap(child => {
+      if (!React.isValidElement(child)) return [];
+      const element = child as React.ReactElement<Record<string, unknown>>;
+      return element.type === "input" ? [element] : inputs(element.props.children as React.ReactNode);
+    });
+  }
+  function render(filter = "all", editable = true) {
+    return Component({ job: { job_id: "job", status: "published" }, candidates, selected, maxRecipients,
+      notificationType: "custom_job", notificationTypeLocked: true, busy: false, editable, filter,
+      setFilter: () => {}, toggle: (id: string) => { selected = toggleCandidateSelection(selected, id, maxRecipients); } });
+  }
+  function click(index: number) {
+    const input = inputs(render())[index];
+    assert.equal(input.props.type, "checkbox");
+    assert.ok(input.props["aria-label"]);
+    (input.props.onChange as () => void)();
+  }
+  try {
+    candidatePage = 1;
+    click(0); click(1); click(2); click(1);
+    assert.deepEqual([...selected], ["M0", "M2"]);
+    assert.equal(inputs(render())[0].props.checked, true);
+    candidatePage = 2; click(0);
+    assert.deepEqual([...selected], ["M0", "M2", "M5"]);
+    candidatePage = 1;
+    assert.match(renderToStaticMarkup(render("line_linked")), /選択中の会員は現在の絞り込み結果には表示されていません/);
+    assert.deepEqual([...selected], ["M0", "M2", "M5"]);
+    maxRecipients = 1; selected = new Set(["M0"]);
+    assert.equal(inputs(render())[1].props.disabled, true);
+    click(1); assert.deepEqual([...selected], ["M0"]);
+    click(0); click(1); assert.deepEqual([...selected], ["M1"]);
+    assert.match(renderToStaticMarkup(render()), /実LINE検証では1名だけ/);
+    maxRecipients = null;
+    assert.doesNotMatch(renderToStaticMarkup(render()), /実LINE検証では1名だけ/);
+    assert.equal(inputs(render("all", false))[1].props.disabled, true);
+  } finally { candidatePage = 1; }
 });

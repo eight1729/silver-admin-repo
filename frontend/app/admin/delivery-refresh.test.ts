@@ -49,6 +49,17 @@ test("pending and mixed states keep exactly one timer and use only GET dependenc
   assert.equal(h.timers.size, 1); assert.equal(h.updates.length, 2);
   assert.equal(h.calls.length, 4); h.loop.stop();
 });
+
+test("three-recipient mixed results poll until canonical terminal aggregation", async () => {
+  const h = harness();
+  h.set(operation(), deliveries("sent", "pending", "pending"));
+  await h.tick();
+  assert.equal(h.timers.size, 1);
+  h.set(operation("completed_with_errors"), deliveries("sent", "failed", "sent"));
+  await h.tick();
+  assert.equal(h.timers.size, 0);
+  assert.equal(h.calls.length, 4);
+});
 test("unmount clears timer and prevents all later requests", async () => {
   const h = harness(); h.loop.stop(); await h.loop.refresh();
   assert.equal(h.timers.size, 0); assert.deepEqual(h.calls, []);

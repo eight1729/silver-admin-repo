@@ -36,14 +36,14 @@ test("job selection uses a compact semantic single-select table", async () => {
 test("staging candidate selection visibly enforces one recipient", async () => {
   const text = await source();
   const candidatePanel = text.slice(text.indexOf("export function CandidateSelectionPanel"), text.indexOf("export function MessageEditorPanel"));
-  assert.match(text, /singleRecipient && selected\.size >= 1 && !isSelected/);
-  assert.match(text, /singleRecipient && selected\.size !== 1/);
+  assert.match(text, /maxRecipients != null && selected\.size >= maxRecipients && !isSelected/);
+  assert.match(text, /maxRecipients != null && selected\.size > maxRecipients/);
   assert.match(text, /実LINE検証では1名だけ選択できます/);
   assert.match(text, /連携済み/);
   assert.match(text, /通知可能/);
   assert.match(candidatePanel, /<table className="candidate-selection-table">/);
   for (const heading of ["会員ID", "氏名", "希望条件", "LINE連携", "通知可否"]) assert.match(candidatePanel, new RegExp(`<th scope="col">${heading}</th>`));
-  assert.match(candidatePanel, /type="radio"/);
+  assert.match(candidatePanel, /type="checkbox"/);
   assert.match(candidatePanel, /name="admin-selected-candidate"/);
   assert.match(candidatePanel, /candidate\.preference_summary/);
   assert.match(candidatePanel, /const pageSize = 5/);
@@ -51,7 +51,7 @@ test("staging candidate selection visibly enforces one recipient", async () => {
   assert.match(candidatePanel, /setPage\(1\)/);
   assert.match(candidatePanel, /aria-current=\{pageNumber === currentPage \? "page" : undefined\}/);
   assert.match(candidatePanel, /href=\{`\/admin\/members\?jobId=/);
-  assert.doesNotMatch(candidatePanel, /type="checkbox"|candidate-selection-list/);
+  assert.doesNotMatch(candidatePanel, /type="radio"|candidate-selection-list/);
   const page = await readFile(new URL("./page.tsx", import.meta.url), "utf8");
   assert.match(page, /title="対象候補会員" badge=\{job \? `\$\{job\.title\}・\$\{candidates\.length\}人`/);
   assert.doesNotMatch(text, /line_subject|allowlist|おすすめ順位|推薦点/);

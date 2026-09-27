@@ -54,7 +54,7 @@ export function JobSelectionPanel({ jobs, selectedJobId, selectedJob, loading, e
   </div>;
 }
 
-export function CandidateSelectionPanel({ job, candidates, selected, notificationType, notificationTypeLocked, setNotificationType, toggle, begin, busy, error, retry, targetsPending, singleRecipient, editable, filter, setFilter }: {
+export function CandidateSelectionPanel({ job, candidates, selected, notificationType, notificationTypeLocked, setNotificationType, toggle, begin, busy, error, retry, targetsPending, maxRecipients, editable, filter, setFilter }: {
   job: AdminJobDetail;
   candidates: AdminCandidate[];
   selected: Set<string>;
@@ -67,11 +67,12 @@ export function CandidateSelectionPanel({ job, candidates, selected, notificatio
   error: boolean;
   retry: () => Promise<void>;
   targetsPending: boolean;
-  singleRecipient: boolean;
+  maxRecipients: number | null;
   editable: boolean;
   filter: CandidateFilterId;
   setFilter: (value: CandidateFilterId) => void;
 }) {
+  const singleRecipient = maxRecipients === 1;
   const pageSize = 5;
   const [page, setPage] = useState(1);
   useEffect(() => { setFilter("all"); setPage(1); }, [job.job_id, setFilter]);
@@ -90,17 +91,17 @@ export function CandidateSelectionPanel({ job, candidates, selected, notificatio
     {pageCandidates.length > 0 && <div className="candidate-table-wrapper"><table className="candidate-selection-table"><colgroup><col className="candidate-select-column"/><col className="candidate-id-column"/><col className="candidate-name-column"/><col className="candidate-preference-column"/><col className="candidate-line-column"/><col className="candidate-eligible-column"/></colgroup><thead><tr><th scope="col"><span className="sr-only">選択</span></th><th scope="col">会員ID</th><th scope="col">氏名</th><th scope="col">希望条件</th><th scope="col">LINE連携</th><th scope="col">通知可否</th></tr></thead><tbody>
       {pageCandidates.map((candidate) => {
         const isSelected = selected.has(candidate.member_id);
-        const limitReached = singleRecipient && selected.size >= 1 && !isSelected;
-        const disabled = !editable || !candidate.eligible || limitReached || busy;
-        return <tr className={`${isSelected ? "is-selected" : ""}${disabled && !isSelected ? " is-disabled" : ""}`} key={candidate.member_id} onClick={() => { if ((!disabled || isSelected) && !busy) toggle(candidate.member_id); }}>
-          <td><input type="radio" name="admin-selected-candidate" checked={isSelected} disabled={disabled} aria-label={`${candidate.display_name}を選択`} aria-describedby={`candidate-state-${candidate.member_id}`} onClick={(event) => event.stopPropagation()} onChange={() => { if (!disabled && !isSelected) toggle(candidate.member_id); }}/></td>
-          <th scope="row">{candidate.member_id}</th><td>{candidate.display_name || "—"}</td><td><span className="candidate-preference-clamp">{candidate.preference_summary || "—"}</span></td><td><span className={`candidate-state-badge ${candidate.line_linked ? "is-positive" : "is-neutral"}`}>{candidate.line_linked ? "連携済み" : "未連携"}</span></td><td><span id={`candidate-state-${candidate.member_id}`} className={`candidate-state-badge ${candidate.eligible ? "is-positive" : "is-negative"}`}>{candidate.eligible ? "通知可能" : "通知不可"}</span>{candidate.reason && <span className="sr-only">{safeReasonLabel(candidate.reason)}</span>}{limitReached && <span className="sr-only">1名選択済み</span>}</td>
+        const limitReached = maxRecipients != null && selected.size >= maxRecipients && !isSelected;
+        const disabled = !editable || (!candidate.eligible && !isSelected) || limitReached || busy;
+        return <tr className={`${isSelected ? "is-selected" : ""}${disabled && !isSelected ? " is-disabled" : ""}`} key={candidate.member_id} onClick={() => { if (!disabled) toggle(candidate.member_id); }}>
+          <td><input type="checkbox" name="admin-selected-candidate" checked={isSelected} disabled={disabled} aria-label={`${candidate.display_name}を選択`} aria-describedby={`candidate-state-${candidate.member_id}`} onClick={(event) => event.stopPropagation()} onChange={() => { if (!disabled) toggle(candidate.member_id); }}/></td>
+          <th scope="row">{candidate.member_id}</th><td>{candidate.display_name || "—"}</td><td><span className="candidate-preference-clamp">{candidate.preference_summary || "—"}</span></td><td><span className={`candidate-state-badge ${candidate.line_linked ? "is-positive" : "is-neutral"}`}>{candidate.line_linked ? "連携済み" : "未連携"}</span></td><td><span id={`candidate-state-${candidate.member_id}`} className={`candidate-state-badge ${candidate.eligible ? "is-positive" : "is-negative"}`}>{candidate.eligible ? "通知可能" : "通知不可"}</span>{candidate.reason && <span className="sr-only">{safeReasonLabel(candidate.reason)}</span>}{limitReached && <span className="sr-only">選択上限に達しています</span>}</td>
         </tr>;
       })}
     </tbody></table></div>}
     {visibleCandidates.length > 0 && <div className="candidate-pagination" aria-label="候補会員のページ切り替え"><span>{(currentPage - 1) * pageSize + 1}〜{Math.min(currentPage * pageSize, visibleCandidates.length)} / {visibleCandidates.length}件</span><div><button type="button" className="admin-button secondary compact" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>前へ</button>{Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => <button type="button" className={`candidate-page-button${pageNumber === currentPage ? " is-current" : ""}`} aria-current={pageNumber === currentPage ? "page" : undefined} onClick={() => setPage(pageNumber)} key={pageNumber}>{pageNumber}</button>)}<button type="button" className="admin-button secondary compact" disabled={currentPage === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>次へ</button></div></div>}
     <div className="candidate-list-link-row"><a className="admin-link" href={`/admin/members?jobId=${encodeURIComponent(job.job_id)}`}>会員一覧へ <span aria-hidden="true">↗</span></a></div>
-    {editable && <><div className="candidate-footer-actions"><label><span>通知種別</span><select value={notificationType} disabled={notificationTypeLocked || busy} onChange={(event) => { if (!notificationTypeLocked && !busy) setNotificationType(event.target.value as NotificationType); }}><option value="new_job_match">新着求人マッチ</option><option value="existing_job_match">既存求人マッチ</option><option value="custom_job">個別求人</option></select></label><button className="admin-button candidate-primary-compact" type="button" disabled={busy || selected.size === 0 || (singleRecipient && selected.size !== 1) || job.status !== "published"} onClick={() => void begin()}>{busy ? "対象を保存中…" : targetsPending ? "対象会員の保存を再試行" : "対象を保存して通知文編集へ"}</button></div>
+    {editable && <><div className="candidate-footer-actions"><label><span>通知種別</span><select value={notificationType} disabled={notificationTypeLocked || busy} onChange={(event) => { if (!notificationTypeLocked && !busy) setNotificationType(event.target.value as NotificationType); }}><option value="new_job_match">新着求人マッチ</option><option value="existing_job_match">既存求人マッチ</option><option value="custom_job">個別求人</option></select></label><button className="admin-button candidate-primary-compact" type="button" disabled={busy || selected.size === 0 || (maxRecipients != null && selected.size > maxRecipients) || job.status !== "published"} onClick={() => void begin()}>{busy ? "対象を保存中…" : targetsPending ? "対象会員の保存を再試行" : "対象を保存して通知文編集へ"}</button></div>
       {targetsPending && <div className="admin-info" role="status">operationは作成済みです。対象会員の保存を再試行してください。</div>}
       {singleRecipient && <p className="candidate-limit-note" role="note">実LINE検証では1名だけ選択できます。選択済みの会員を解除すると別の会員を選べます。</p>}</>}
     {!editable && <p className="panel-guidance">対象を変更する場合は、送信前確認から「対象変更」を選択してください。</p>}

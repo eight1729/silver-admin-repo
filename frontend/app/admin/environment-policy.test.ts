@@ -46,9 +46,9 @@ test("Admin exposes safe staging LINE mode and enforces one-recipient UI", async
   assert.match(page, /canAttemptSend\(lineSendMode/);
   assert.match(page, /deriveNotificationUiState/);
   assert.match(page, /canSend=\{workflowState\.canSend\}/);
-  assert.match(policy, /args\.selectedCount === 1/);
-  assert.match(policy, /args\.validation\.selected_count === 1/);
-  assert.match(policy, /args\.validation\.sendable_count === 1/);
+  assert.match(policy, /args\.selectedCount > 0/);
+  assert.match(policy, /args\.validation\.selected_count > 0/);
+  assert.match(policy, /args\.validation\.sendable_count > 0/);
   assert.match(policy, /args\.validationCurrent/);
   assert.match(policy, /!args\.liveBlocked/);
   assert.match(policy, /args\.liveLinkReady/);

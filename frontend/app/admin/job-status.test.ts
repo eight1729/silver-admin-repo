@@ -62,7 +62,7 @@ test("existing published-only selection and notification guards remain in place"
   const page = await source("./page.tsx");
   assert.match(major, /const selectable = item.status === "published";/);
   assert.match(major, /const disabled = busy \|\| !selectable;/);
-  assert.match(major, /disabled=\{busy \|\| selected.size === 0 \|\| \(singleRecipient && selected.size !== 1\) \|\| job.status !== "published"\}/);
+  assert.match(major, /disabled=\{busy \|\| selected.size === 0 \|\| \(maxRecipients != null && selected.size > maxRecipients\) \|\| job.status !== "published"\}/);
   assert.match(page, /job.status !== "published" && <div className="admin-error">この求人は募集中ではありません。/);
   assert.match(page, /disabled=\{!job \|\| !selected.size \|\| busy \|\| job.status !== "published"\}/);
 });
