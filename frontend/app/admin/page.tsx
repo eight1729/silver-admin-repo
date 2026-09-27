@@ -11,6 +11,7 @@ import {
 import { ADMIN_HOME_EVENT } from "./AdminHomeButton";
 import { createDeliveryRefresh } from "./delivery-refresh";
 import { jobStatusLabel } from "./job-status";
+import { toggleCandidateSelection } from "./candidate-selection";
 import { clearedTransientAdminState, createOrSaveTargets, restoreAdminOperation, saveThenValidate, sendThenLoadDeliveries } from "./admin-workflow";
 import { AdminPanel } from "./AdminPanel";
 import { AdminShell } from "./AdminShell";
@@ -94,6 +95,7 @@ export default function AdminPage() {
   const hasTerminalDelivery = Boolean(currentDeliveries?.items.length && currentDeliveries.items.every((item) => item.status === "sent" || item.status === "failed" || item.status === "unknown" || item.status === "skipped"));
   const workflowState = deriveNotificationUiState({
     hasJob: Boolean(job), selectedCount: selected.size,
+    maxRecipients: lineSendMode?.max_recipients ?? null,
     messageValid: Object.values(message).every((value) => value.trim()),
     operation, validation, validationCurrent,
     validationWasInvalidated: validationInvalidation !== null,
@@ -296,7 +298,9 @@ export default function AdminPage() {
   }
 
   function toggle(memberId: string) {
-    const next = selected.has(memberId) ? new Set<string>() : new Set([memberId]);
+    if (busy || step !== "detail" || workflowState.terminal) return;
+    if (!selected.has(memberId) && !candidates.some((candidate) => candidate.member_id === memberId && candidate.eligible)) return;
+    const next = toggleCandidateSelection(selected, memberId, lineSendMode?.max_recipients ?? null);
     if (memberSelectionsEqual(selected, next)) return;
     setSelected(next); setValidationSnapshot(null); setDeliveries(null); setDeliveriesError(""); setQueueFailure(false);
     if (validation || validationSnapshot || operation?.status === "ready") setValidationInvalidation("対象会員が変更されたため、再検証が必要です。");
@@ -378,7 +382,7 @@ export default function AdminPage() {
   }
 
   async function beginOperation() {
-    if (!job || selected.size === 0 || busy) return;
+    if (!job || selected.size === 0 || busy || (lineSendMode?.max_recipients != null && selected.size > lineSendMode.max_recipients)) return;
     setBusy(true); clearFeedback();
     try {
       const current = await createOrSaveTargets({
@@ -475,7 +479,7 @@ export default function AdminPage() {
       <JobSelectionPanel jobs={jobs} selectedJobId={selectedJobId} selectedJob={job} loading={loading} error={jobsError} busy={busy || workflowAction === "sending"} retry={() => void loadJobs()} select={async (jobId) => requestJobSelection(jobId)} />
     </AdminPanel>
     <AdminPanel number={2} title="対象候補会員" badge={job ? `${job.title}・${candidates.length}人` : undefined} actions={job ? <CandidateFilterMenu value={candidateFilter} onChange={setCandidateFilter} /> : undefined}>
-      {!selectedJobId ? <p className="admin-panel-empty">求人を選択すると、通知候補会員を読み込みます。</p> : !job ? <div className={detailError ? "admin-error" : "admin-info"} role={detailError ? "alert" : "status"}>{detailError ? <><p>選択求人の詳細を取得できませんでした。</p><button className="admin-button secondary" disabled={busy} onClick={() => void retryDetail()}>求人詳細を再読み込み</button></> : "選択求人を読み込んでいます。"}</div> : <CandidateSelectionPanel job={job} candidates={candidates} selected={selected} notificationType={operation?.notification_type ?? notificationType} notificationTypeLocked={operation !== null} setNotificationType={changeNotificationType} toggle={toggle} begin={beginOperation} busy={busy} error={candidatesError} retry={retryCandidates} targetsPending={targetsPending} singleRecipient={lineSendMode?.max_recipients === 1} editable={step === "detail" && !workflowState.terminal} filter={candidateFilter} setFilter={setCandidateFilter} />}
+      {!selectedJobId ? <p className="admin-panel-empty">求人を選択すると、通知候補会員を読み込みます。</p> : !job ? <div className={detailError ? "admin-error" : "admin-info"} role={detailError ? "alert" : "status"}>{detailError ? <><p>選択求人の詳細を取得できませんでした。</p><button className="admin-button secondary" disabled={busy} onClick={() => void retryDetail()}>求人詳細を再読み込み</button></> : "選択求人を読み込んでいます。"}</div> : <CandidateSelectionPanel job={job} candidates={candidates} selected={selected} notificationType={operation?.notification_type ?? notificationType} notificationTypeLocked={operation !== null} setNotificationType={changeNotificationType} toggle={toggle} begin={beginOperation} busy={busy} error={candidatesError} retry={retryCandidates} targetsPending={targetsPending} maxRecipients={lineSendMode?.max_recipients ?? null} editable={step === "detail" && !workflowState.terminal} filter={candidateFilter} setFilter={setCandidateFilter} />}
     </AdminPanel>
     </div>
     <AdminPanel number={3} title="通知文編集" badge={job?.title} status={workflowState.state === "stale" ? "再検証が必要" : step === "edit" ? "現在の操作" : operation ? "下書きあり" : "未準備"}>
@@ -523,7 +527,6 @@ function Preview({ job, message, lineSendMode, notificationLink }: { job: AdminJ
 function Confirmation({ job, operation, validation, candidates, selected, send, revalidate, busy, edit, targets, lineSendMode, notificationLink }: { job: AdminJobDetail; operation: AdminOperation; validation: AdminValidation; candidates: AdminCandidate[]; selected: Set<string>; send: () => Promise<void>; revalidate: () => Promise<void>; busy: boolean; edit: () => void; targets: () => void; lineSendMode: AdminLineSendMode | null; notificationLink: string | null }) {
   const live = isLiveMode(lineSendMode);
   const ready = live && canAttemptSend(lineSendMode);
-  const oneRecipient = validation.selected_count === 1 && validation.sendable_count === 1;
   return <><p className="fake-warning">{sendWarning(lineSendMode)}</p><section className="admin-card"><h2>送信前確認</h2><p><strong>{job.title}</strong>（version {job.version}）</p><p>通知種別：{notificationTypeLabel(operation.notification_type)}</p><p>求人リンク：{ready ? notificationLink ?? "取得できません" : job.job_url}</p><div className="summary-grid"><Summary label="選択" value={validation.selected_count}/><Summary label="送信可能" value={validation.sendable_count}/><Summary label="skipped予定" value={validation.skipped_count}/></div>{lineSendMode?.max_recipients != null && validation.sendable_count > lineSendMode.max_recipients && <div className="admin-error">送信上限は{lineSendMode.max_recipients}名です。</div>}{live && !ready && <div className="admin-error">実LINE送信設定を確認してください。</div>}{validation.version_changed && <div className="admin-error">求人versionが変更されています。</div>}{!validation.can_proceed && <div className="admin-error">この状態では送信できません。{validation.reasons.map(reasonLabel).join("、")}</div>}<h3>対象者</h3><ul>{candidates.filter((x) => selected.has(x.member_id)).map((x) => <li key={x.member_id}>{x.display_name} — {x.line_linked ? "送信対象" : "LINE未連携・skipped予定"}</li>)}</ul><h3>完成した通知文</h3><div className="preview-bubble">{ready && safetyPrefix(lineSendMode)}{ready && safetyPrefix(lineSendMode) && "\n\n"}{operation.message.greeting}{"\n\n"}{operation.message.introduction}{"\n\n"}{operation.message.note}</div><p className="admin-muted">送信時にもBackendで再validateされます。この結果だけを永続的な送信許可として扱いません。</p><div className="admin-actions"><button className="admin-button secondary" onClick={edit}>文面編集へ戻る</button><button className="admin-button secondary" onClick={targets}>対象変更へ戻る</button><button className="admin-button secondary" disabled={busy} onClick={() => void revalidate()}>再validate</button><button className="admin-button" disabled={busy || !validation.can_proceed || operation.status !== "ready" || !canAttemptSend(lineSendMode, validation.sendable_count) || (live && (!ready || !notificationLink))} onClick={() => void send()}>{busy ? "送信中…" : `${modePresentation(lineSendMode).label}を実行`}</button></div></section></>;
 }
 

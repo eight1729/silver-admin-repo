@@ -54,6 +54,7 @@ export function isTerminalOperation(operation: AdminOperation | null): boolean {
 export function deriveNotificationUiState(args: {
   hasJob: boolean;
   selectedCount: number;
+  maxRecipients?: number | null;
   messageValid: boolean;
   operation: AdminOperation | null;
   validation: AdminValidation | null;
@@ -68,13 +69,15 @@ export function deriveNotificationUiState(args: {
 }) {
   const terminal = isTerminalOperation(args.operation) || args.hasTerminalDelivery;
   const canSaveDraft = args.hasJob && args.messageValid && Boolean(args.operation) && !args.busy && !terminal;
-  const canValidate = args.hasJob && args.selectedCount === 1 && args.messageValid && Boolean(args.operation) && !args.busy && !terminal && args.liveLinkReady;
+  const withinLimit = args.maxRecipients == null || args.selectedCount <= args.maxRecipients;
+  const canValidate = args.hasJob && args.selectedCount > 0 && withinLimit && args.messageValid && Boolean(args.operation) && !args.busy && !terminal && args.liveLinkReady;
   const canSend = canValidate
     && args.action === "idle"
     && args.operation?.status === "ready"
     && args.validation?.can_proceed === true
-    && args.validation.selected_count === 1
-    && args.validation.sendable_count === 1
+    && args.validation.selected_count > 0
+    && args.validation.sendable_count > 0
+    && (args.maxRecipients == null || args.validation.sendable_count <= args.maxRecipients)
     && args.validationCurrent
     && !args.liveBlocked
     && args.liveLinkReady
