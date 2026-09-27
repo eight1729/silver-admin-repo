@@ -11,6 +11,7 @@ import type {
   NotificationType,
 } from "../lib/admin-api";
 import { formatBlockingReasons } from "./blocking-reasons";
+import { validationProblemReasons } from "./validation-problem-reasons";
 import { candidateFilters, filterCandidates, type CandidateFilterId } from "./candidate-filters";
 import { CENTER_DISPLAY_NAME_MAX_LENGTH, composeAdminMessage, notificationBody, notificationNotice, notificationTemplates, type SelectedTemplateId } from "./notification-templates";
 import { uiStatePresentation, type NotificationUiState, type WorkflowAction } from "./notification-ui-state";
@@ -195,7 +196,7 @@ function SendOverview({ operation, validation, candidates, selected, validationC
     else problems.add("送信モードが利用できません。");
   }
   if (queueFailure) problems.add("送信処理は開始されていません。自動再送は行いません。");
-  if (validationCurrent) validation?.reasons.forEach((reason) => problems.add(safeReasonLabel(reason)));
+  if (validationCurrent && validation) validationProblemReasons(validation.reasons).forEach((reason) => problems.add(safeReasonLabel(reason)));
   const result = validating ? { icon: "…", text: "検証中", className: "is-pending" }
     : validated ? { icon: "✓", text: "問題ありません", className: "is-success" }
       : hasProblem ? { icon: "×", text: "問題があります", className: "is-problem" }
