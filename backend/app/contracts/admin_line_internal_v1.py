@@ -66,6 +66,7 @@ class NotificationResult(ContractModel):
     status: NotificationCommandStatus
     reason_code: str | None = Field(default=None, max_length=128)
     accepted_at: datetime | None = None
+    sent_at: datetime | None = None
     updated_at: datetime
 
 

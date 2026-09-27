@@ -44,6 +44,7 @@ def _result(command, status="accepted"):
         "operation_id": str(command.operation_id), "target_id": str(command.target_id),
         "external_member_id": command.external_member_id, "status": status,
         "reason_code": None, "accepted_at": NOW.isoformat(), "updated_at": NOW.isoformat(),
+        "sent_at": NOW.isoformat() if status == "sent" else None,
     }
 
 

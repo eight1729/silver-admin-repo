@@ -1,6 +1,7 @@
 """Admin-owned HTTP adapter for the versioned LINE internal contract."""
 
 from urllib.parse import urlsplit
+from datetime import datetime
 from uuid import UUID
 
 import httpx
@@ -36,12 +37,24 @@ class LineInternalApiPermanentError(LineInternalApiClientError):
     pass
 
 
+class LineNotificationResultNotFoundError(LineInternalApiPermanentError):
+    """Result GET returned 404, not an accepted command still awaiting delivery."""
+
+
 def validate_notification_result_identity(result, expected) -> None:
-    """Check only the immutable identity shared by a Command and its Outbox."""
+    """Validate immutable identity and the required sent-result event time."""
     if any(getattr(result, field, None) != getattr(expected, field) for field in (
         "command_id", "operation_id", "target_id", "external_member_id",
     )):
         raise LineInternalApiRetryableError("LINE notification response identity mismatch")
+    validate_notification_result_timestamps(result)
+
+
+def validate_notification_result_timestamps(result) -> None:
+    if getattr(result.status, "value", result.status) == "sent":
+        sent_at = getattr(result, "sent_at", None)
+        if not isinstance(sent_at, datetime) or sent_at.tzinfo is None or sent_at.utcoffset() is None:
+            raise LineInternalApiRetryableError("LINE sent result has no valid sent timestamp")
 
 
 class HttpLineInternalApiClient:
@@ -77,6 +90,7 @@ class HttpLineInternalApiClient:
         )
         if result.command_id != command_id:
             raise LineInternalApiRetryableError("LINE notification response identity mismatch")
+        validate_notification_result_timestamps(result)
         return result
 
     async def batch_get_linkages(self, request: LinkageStatusBatchRequest):
@@ -123,6 +137,10 @@ class HttpLineInternalApiClient:
             raise LineInternalApiRetryableError(
                 "LINE internal API transport is unavailable"
             ) from error
+        if response.status_code == 404 and method == "GET" and model is NotificationResult:
+            raise LineNotificationResultNotFoundError(
+                "LINE notification result was not found (404)"
+            )
         if response.status_code == 409 or 400 <= response.status_code < 500:
             raise LineInternalApiPermanentError(
                 f"LINE internal API rejected the request ({response.status_code})"

@@ -1,8 +1,4 @@
 .admin-shell{min-height:100vh;background:#f5f7f6;color:#1d2925}
-.admin-header{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:1.1rem max(1rem,calc((100vw - 1120px)/2));background:#fff;border-bottom:1px solid #dce3df}
-.admin-header h1{font-size:1.35rem;margin:.15rem 0}
-.admin-kicker{margin:0;color:#32705b;font-size:.75rem;font-weight:700;letter-spacing:.12em}
-.admin-home-link{color:#245f4d;font-weight:700}
 .demo-notice{display:flex;gap:.75rem;align-items:center;padding:.9rem max(1rem,calc((100vw - 1120px)/2));background:#fff4d6;border-bottom:1px solid #ead49a;line-height:1.5}
 .admin-main{max-width:1120px;margin:auto;padding:2rem 1rem 4rem}
 .admin-toolbar,.admin-actions{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
@@ -37,15 +33,16 @@
 .admin-section{margin-top:1.5rem}
 .sr-status{min-height:1.5rem}
 .fake-warning{font-weight:700;color:#6b4c18;background:#fff4d6;padding:.8rem;border-radius:9px}
-@media(max-width:640px){.admin-header,.demo-notice{align-items:flex-start;flex-direction:column}
+@media(max-width:640px){.demo-notice{align-items:flex-start;flex-direction:column}
 .admin-main{padding-top:1.25rem}
 .admin-actions .admin-button{flex:1}
 .delivery{flex-direction:column;gap:.25rem}
 }
 
-.admin-legacy-header{display:none}
 .admin-workspace{min-height:100vh;background:#f4f7f5}
-.admin-app-header{position:sticky;top:0;z-index:30;display:flex;align-items:center;justify-content:space-between;gap:1.5rem;min-height:76px;padding:.75rem 1.5rem;background:#fff;border-bottom:1px solid #d8e1dc}
+.admin-app-header{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;min-height:76px;padding:.75rem 1.5rem;background:#fff;border-bottom:1px solid #d8e1dc}
+.admin-header-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.5rem;margin-left:auto;max-width:100%}
+.admin-header-actions .admin-button{max-width:100%;white-space:normal}
 .admin-app-title,.admin-header-context,.admin-safe-context,.admin-mode{display:flex;align-items:center}
 .admin-app-title{gap:.8rem}
 .admin-app-title h1{margin:0;font-size:1.35rem}
@@ -98,6 +95,7 @@
 }
 
 @media(max-width:760px){.admin-app-header{align-items:flex-start;padding:.7rem 1rem}
+.admin-header-actions{width:100%}
 .admin-header-context{margin-left:auto}
 .admin-mode small{display:none}
 .admin-menu-toggle{display:inline-grid;place-items:center}

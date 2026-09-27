@@ -8,6 +8,7 @@ from uuid import UUID
 from app.adapter.line_internal_api import (
     LineInternalApiPermanentError,
     LineInternalApiRetryableError,
+    LineNotificationResultNotFoundError,
     validate_notification_result_identity,
 )
 from app.domain.enums.enums import DeliveryStatus
@@ -103,6 +104,20 @@ class AdminLineResultReconciler:
                 validate_notification_result_identity(result, item)
             except Exception as error:
                 logger.warning("Admin result polling failed: %s", type(error).__name__)
+                if isinstance(error, LineNotificationResultNotFoundError):
+                    # accepted means LINE committed the command. Missing provider
+                    # delivery returns accepted/pending, not 404. Converge this
+                    # permanent lookup failure without inventing a provider result
+                    # or replaying the command. The repository fences concurrent
+                    # terminal deliveries and aggregates in the same transaction.
+                    delivery = by_member.get(item.external_member_id)
+                    if delivery is not None:
+                        failed = replace(
+                            delivery, status=DeliveryStatus.FAILED,
+                            error_code="line_result_not_found", error_message=None,
+                        ) if delivery.status is DeliveryStatus.PENDING else delivery
+                        await self._repository.reconcile_outbox_result(
+                            service_id, operation_id, item.outbox_id, failed)
                 continue
             delivery = by_member.get(item.external_member_id)
             if delivery is None:
@@ -126,7 +141,7 @@ class AdminLineResultReconciler:
         if status == "sent":
             return replace(
                 delivery, status=DeliveryStatus.SENT, error_code=None,
-                error_message=None, sent_at=result.updated_at,
+                error_message=None, sent_at=result.sent_at,
             )
         if status == "failed":
             return replace(

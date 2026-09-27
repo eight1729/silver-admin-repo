@@ -23,6 +23,8 @@ NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def _result(item, **kwargs):
+    kwargs.setdefault("status", "accepted")
+    kwargs.setdefault("sent_at", NOW if getattr(kwargs["status"], "value", kwargs["status"]) == "sent" else None)
     return SimpleNamespace(**{field: getattr(item, field) for field in (
         "command_id", "operation_id", "target_id", "external_member_id",
     )}, **kwargs)

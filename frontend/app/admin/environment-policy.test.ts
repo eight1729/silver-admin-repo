@@ -22,7 +22,7 @@ test("staging uses verification copy", async () => {
   assert.match(layout, /現在のLINE送信モードと送信可否を画面内で確認/);
   assert.match(layout, /送信時にはBackendでも再検証/);
   assert.doesNotMatch(layout, /業務データはモックです|現在は実LINE通知を送信しません|Backend再起動で一時データが初期化されます/);
-  assert.match(layout, /LOCAL DEMO/);
+  assert.doesNotMatch(layout, /admin-legacy-header|STAGING VERIFICATION|LOCAL DEMO/);
   assert.match(layout, /ローカルデモ環境/);
 });
 
