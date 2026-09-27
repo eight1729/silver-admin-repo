@@ -34,6 +34,7 @@ from app.domain.models.external_business import (
     JobSearchQuery,
 )
 from app.domain.ports.external_business import ExternalBusinessGateway
+from app.adapter.line_internal_api import LineInternalApiClientError
 from app.domain.ports.organization_service_scope import (
     OrganizationServiceScopeResolver,
     OrganizationServiceScopeNotConfiguredError,
@@ -41,6 +42,7 @@ from app.domain.ports.organization_service_scope import (
 from app.contracts.admin_line_internal_v1 import (
     LiffDeepLinkRequest,
     LinkageStatusBatchRequest,
+    LinkageStatusBatchResponse,
     ServiceOrganizationScope,
 )
 
@@ -169,22 +171,35 @@ class AdminApplicationService:
         linkage = None
         if self._line_internal_client is not None:
             scope = self._line_scope(service_id)
-            response = await self._line_internal_client.batch_get_linkages(
-                LinkageStatusBatchRequest(
-                    scope=scope,
-                    external_member_ids=tuple(
-                        item.external_member_id for item in candidates
-                    ),
-                )
+            linkage = await self._lookup_linkages(
+                scope, (item.external_member_id for item in candidates)
             )
-            linkage = {item.external_member_id: item.line_linked for item in response.items}
         return tuple(
             self._candidate(
                 item,
-                None if linkage is None else linkage.get(item.external_member_id, False),
+                None if linkage is None else linkage[item.external_member_id],
             )
             for item in candidates
         )
+
+    async def _lookup_linkages(self, scope, member_ids):
+        ids = tuple(dict.fromkeys(member_ids))
+        lookup = {}
+        try:
+            for offset in range(0, len(ids), 500):
+                chunk = ids[offset:offset + 500]
+                response = LinkageStatusBatchResponse.model_validate(
+                    await self._line_internal_client.batch_get_linkages(
+                        LinkageStatusBatchRequest(scope=scope, external_member_ids=chunk)
+                    )
+                )
+                returned = tuple(item.external_member_id for item in response.items)
+                if len(returned) != len(chunk) or set(returned) != set(chunk):
+                    raise ValueError("linkage response identity mismatch")
+                lookup.update((item.external_member_id, item.line_linked) for item in response.items)
+        except (LineInternalApiClientError, ValueError):
+            raise AdminDependencyUnavailableError("LINE linkage lookup unavailable") from None
+        return lookup
 
     def _candidate(self, item: CandidateMember, line_linked: bool | None = None) -> AdminCandidate:
         return AdminCandidate(

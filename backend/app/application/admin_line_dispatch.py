@@ -8,6 +8,7 @@ from uuid import UUID
 from app.adapter.line_internal_api import (
     LineInternalApiPermanentError,
     LineInternalApiRetryableError,
+    validate_notification_result_identity,
 )
 from app.domain.enums.enums import DeliveryStatus
 from app.domain.models.admin_notification import NotificationOutboxState
@@ -31,9 +32,10 @@ class AdminLineOutboxDispatcher:
         )
         for item in claimed:
             try:
-                await asyncio.wait_for(self._line_client.submit_notification_command(
+                result = await asyncio.wait_for(self._line_client.submit_notification_command(
                     self._command(item)
                 ), timeout=30)
+                validate_notification_result_identity(result, item)
             except (LineInternalApiRetryableError, asyncio.TimeoutError):
                 state = NotificationOutboxState.RETRYABLE_FAILURE
             except LineInternalApiPermanentError:
@@ -98,6 +100,7 @@ class AdminLineResultReconciler:
         for item in page:
             try:
                 result = await asyncio.wait_for(self._line_client.get_notification_result(item.command_id), timeout=30)
+                validate_notification_result_identity(result, item)
             except Exception as error:
                 logger.warning("Admin result polling failed: %s", type(error).__name__)
                 continue

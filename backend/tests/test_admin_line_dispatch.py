@@ -22,6 +22,12 @@ from app.contracts.admin_line_internal_v1 import NotificationCommandStatus
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
+def _result(item, **kwargs):
+    return SimpleNamespace(**{field: getattr(item, field) for field in (
+        "command_id", "operation_id", "target_id", "external_member_id",
+    )}, **kwargs)
+
+
 def _outbox():
     return NotificationOutboxRecord(
         outbox_id=uuid4(), command_id=uuid4(), operation_id=uuid4(), target_id=uuid4(),
@@ -67,7 +73,7 @@ class Client:
         self.submit_calls += 1; self.commands.append(command)
         outcome = self.outcomes.pop(0) if self.outcomes else None
         if isinstance(outcome, Exception): raise outcome
-        return outcome
+        return _result(command) if outcome is None else outcome
     async def get_notification_result(self, command_id): return self.outcomes[0]
 
 
@@ -78,7 +84,7 @@ class FakeOperation:
 
 @pytest.mark.asyncio
 async def test_dispatch_uses_exact_outbox_command_and_marks_accepted():
-    item=_outbox(); repo=Repo(item); client=Client([SimpleNamespace()])
+    item=_outbox(); repo=Repo(item); client=Client([_result(item)])
     await AdminLineOutboxDispatcher(repository=repo, line_client=client).dispatch_operation(service_id="svc", operation_id=item.operation_id)
     sent=client.commands[0]
     assert repo.item.state is NotificationOutboxState.ACCEPTED
@@ -89,7 +95,7 @@ async def test_dispatch_uses_exact_outbox_command_and_marks_accepted():
 
 @pytest.mark.asyncio
 async def test_post_timeout_remains_retryable_and_replays_same_command():
-    item=_outbox(); repo=Repo(item); client=Client([LineInternalApiRetryableError("timeout"), SimpleNamespace()])
+    item=_outbox(); repo=Repo(item); client=Client([LineInternalApiRetryableError("timeout"), _result(item)])
     dispatcher=AdminLineOutboxDispatcher(repository=repo, line_client=client)
     await dispatcher.dispatch_operation(service_id="svc", operation_id=item.operation_id)
     assert repo.item.state is NotificationOutboxState.RETRYABLE_FAILURE
@@ -110,7 +116,7 @@ async def test_contract_conflict_is_permanent_and_not_reclaimed():
 
 @pytest.mark.asyncio
 async def test_concurrent_dispatch_claims_once():
-    item=_outbox(); repo=Repo(item); client=Client([SimpleNamespace()])
+    item=_outbox(); repo=Repo(item); client=Client([_result(item)])
     dispatcher=AdminLineOutboxDispatcher(repository=repo, line_client=client)
     await asyncio.gather(
         dispatcher.dispatch_operation(service_id="svc", operation_id=item.operation_id),
@@ -130,7 +136,7 @@ async def test_concurrent_dispatch_claims_once():
 )
 async def test_reconciliation_projects_contract_status_idempotently(contract_status, business_status):
     item=replace(_outbox(), state=NotificationOutboxState.ACCEPTED); repo=Repo(item)
-    result=SimpleNamespace(status=NotificationCommandStatus(contract_status), reason_code="reason", updated_at=NOW)
+    result=_result(item, status=NotificationCommandStatus(contract_status), reason_code="reason", updated_at=NOW)
     client=Client([result]); reconciler=AdminLineResultReconciler(repository=repo, line_client=client)
     await reconciler.reconcile_operation(service_id="svc", operation_id=item.operation_id)
     await reconciler.reconcile_operation(service_id="svc", operation_id=item.operation_id)
@@ -142,7 +148,7 @@ async def test_reconciliation_projects_contract_status_idempotently(contract_sta
 @pytest.mark.asyncio
 async def test_provider_unknown_never_resubmits_command():
     item=replace(_outbox(), state=NotificationOutboxState.ACCEPTED); repo=Repo(item)
-    result=SimpleNamespace(status=NotificationCommandStatus.UNKNOWN, reason_code="unknown_result", updated_at=NOW)
+    result=_result(item, status=NotificationCommandStatus.UNKNOWN, reason_code="unknown_result", updated_at=NOW)
     client=Client([result]); reconciler=AdminLineResultReconciler(repository=repo, line_client=client)
     await reconciler.reconcile_operation(service_id="svc", operation_id=item.operation_id)
     assert repo.delivery.status is DeliveryStatus.UNKNOWN

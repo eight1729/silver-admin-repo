@@ -36,6 +36,14 @@ class LineInternalApiPermanentError(LineInternalApiClientError):
     pass
 
 
+def validate_notification_result_identity(result, expected) -> None:
+    """Check only the immutable identity shared by a Command and its Outbox."""
+    if any(getattr(result, field, None) != getattr(expected, field) for field in (
+        "command_id", "operation_id", "target_id", "external_member_id",
+    )):
+        raise LineInternalApiRetryableError("LINE notification response identity mismatch")
+
+
 class HttpLineInternalApiClient:
     def __init__(
         self,
@@ -54,17 +62,22 @@ class HttpLineInternalApiClient:
         self._token = bearer_token
 
     async def submit_notification_command(self, command):
-        return await self._request(
+        result = await self._request(
             "POST", "/internal/v1/notification-commands",
             NotificationResult, expected_status=202,
             json=command.model_dump(mode="json"),
         )
+        validate_notification_result_identity(result, command)
+        return result
 
     async def get_notification_result(self, command_id: UUID):
-        return await self._request(
+        result = await self._request(
             "GET", f"/internal/v1/notification-commands/{command_id}",
             NotificationResult, expected_status=200,
         )
+        if result.command_id != command_id:
+            raise LineInternalApiRetryableError("LINE notification response identity mismatch")
+        return result
 
     async def batch_get_linkages(self, request: LinkageStatusBatchRequest):
         return await self._request(
