@@ -303,9 +303,9 @@ export default function AdminPage() {
   }
 
   function changeNotificationType(next: NotificationType) {
-    if (next === notificationType) return;
+    if (operation || busy || next === notificationType) return;
     setNotificationType(next); setValidationSnapshot(null); setDeliveries(null); setDeliveriesError("");
-    if (validation || validationSnapshot || operation?.status === "ready") setValidationInvalidation("通知種別が変更されたため、再検証が必要です。");
+    if (validation || validationSnapshot) setValidationInvalidation("通知種別が変更されたため、再検証が必要です。");
   }
 
   function changeMessage(next: AdminMessage) {
@@ -387,12 +387,12 @@ export default function AdminPage() {
         selectedMemberIds: [...selected], create: adminApi.createOperation,
         saveTargets: adminApi.updateTargets, reload: adminApi.operation,
         onCreated: (created) => {
-          setOperation(created); setTargetsPending(true);
+          setOperation(created); setNotificationType(created.notification_type); setTargetsPending(true);
           sessionStorage.setItem(STORAGE_KEY, created.operation_id);
           sessionStorage.setItem(SELECTED_KEY, JSON.stringify([...selected]));
         },
       });
-      setOperation(current); setTargetsPending(false); setValidation(null);
+      setOperation(current); setNotificationType(current.notification_type); setTargetsPending(false); setValidation(null);
       sessionStorage.setItem(SELECTED_KEY, JSON.stringify([...selected]));
       setSuccess("対象者を保存しました。"); setStep("edit");
     } catch (e) {
@@ -475,7 +475,7 @@ export default function AdminPage() {
       <JobSelectionPanel jobs={jobs} selectedJobId={selectedJobId} selectedJob={job} loading={loading} error={jobsError} busy={busy || workflowAction === "sending"} retry={() => void loadJobs()} select={async (jobId) => requestJobSelection(jobId)} />
     </AdminPanel>
     <AdminPanel number={2} title="対象候補会員" badge={job ? `${job.title}・${candidates.length}人` : undefined} actions={job ? <CandidateFilterMenu value={candidateFilter} onChange={setCandidateFilter} /> : undefined}>
-      {!selectedJobId ? <p className="admin-panel-empty">求人を選択すると、通知候補会員を読み込みます。</p> : !job ? <div className={detailError ? "admin-error" : "admin-info"} role={detailError ? "alert" : "status"}>{detailError ? <><p>選択求人の詳細を取得できませんでした。</p><button className="admin-button secondary" disabled={busy} onClick={() => void retryDetail()}>求人詳細を再読み込み</button></> : "選択求人を読み込んでいます。"}</div> : <CandidateSelectionPanel job={job} candidates={candidates} selected={selected} notificationType={notificationType} setNotificationType={changeNotificationType} toggle={toggle} begin={beginOperation} busy={busy} error={candidatesError} retry={retryCandidates} targetsPending={targetsPending} singleRecipient={lineSendMode?.max_recipients === 1} editable={step === "detail" && !workflowState.terminal} filter={candidateFilter} setFilter={setCandidateFilter} />}
+      {!selectedJobId ? <p className="admin-panel-empty">求人を選択すると、通知候補会員を読み込みます。</p> : !job ? <div className={detailError ? "admin-error" : "admin-info"} role={detailError ? "alert" : "status"}>{detailError ? <><p>選択求人の詳細を取得できませんでした。</p><button className="admin-button secondary" disabled={busy} onClick={() => void retryDetail()}>求人詳細を再読み込み</button></> : "選択求人を読み込んでいます。"}</div> : <CandidateSelectionPanel job={job} candidates={candidates} selected={selected} notificationType={operation?.notification_type ?? notificationType} notificationTypeLocked={operation !== null} setNotificationType={changeNotificationType} toggle={toggle} begin={beginOperation} busy={busy} error={candidatesError} retry={retryCandidates} targetsPending={targetsPending} singleRecipient={lineSendMode?.max_recipients === 1} editable={step === "detail" && !workflowState.terminal} filter={candidateFilter} setFilter={setCandidateFilter} />}
     </AdminPanel>
     </div>
     <AdminPanel number={3} title="通知文編集" badge={job?.title} status={workflowState.state === "stale" ? "再検証が必要" : step === "edit" ? "現在の操作" : operation ? "下書きあり" : "未準備"}>

@@ -293,7 +293,8 @@ async def test_runner_pages_and_failure_isolation_and_private_logs(db, caplog):
     await runner.run_cycle()
     assert len(calls) == 2
     assert len(reconciled) == 2
-    assert "RuntimeError" in caplog.text and "private message" not in caplog.text
+    assert "reason_category=runner_action" in caplog.text and "private message" not in caplog.text
+    assert "operation_id=" in caplog.text and "stage=dispatch" in caplog.text
     # SQL selection is bounded and keyset pagination does not revisit the first page.
     for _ in range(3): await seed(db)
     first = await repo.list_recovery_operations("svc", limit=2)

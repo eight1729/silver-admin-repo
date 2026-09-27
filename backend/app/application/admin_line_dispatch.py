@@ -22,6 +22,23 @@ from app.contracts.admin_line_internal_v1 import (
 logger = logging.getLogger(__name__)
 
 
+def _failure(item, stage, error):
+    # Never render exception text/causes, remote bodies, or member identifiers.
+    category = getattr(error, "reason_category", "unavailable")
+    if isinstance(error, LineNotificationResultNotFoundError):
+        category = "not_found"
+    elif isinstance(error, asyncio.TimeoutError):
+        category = "timeout"
+    if not isinstance(category, str) or category not in {"not_found", "timeout", "connection", "http", "contract", "identity_mismatch", "unavailable"}:
+        category = "unavailable"
+    reason = "response_identity_mismatch" if category == "identity_mismatch" else f"{stage}_{category}"
+    status = getattr(error, "http_status", None)
+    status = status if type(status) is int and 100 <= status <= 599 else None
+    logger.log(logging.ERROR if category in {"contract", "identity_mismatch"} else logging.WARNING,
+        "component=admin_notification stage=%s event=failed reason_category=%s command_id=%s operation_id=%s target_id=%s http_status=%s",
+        stage, reason, item.command_id, item.operation_id, item.target_id, status)
+
+
 class AdminLineOutboxDispatcher:
     def __init__(self, *, repository, line_client) -> None:
         self._repository = repository
@@ -37,12 +54,16 @@ class AdminLineOutboxDispatcher:
                     self._command(item)
                 ), timeout=30)
                 validate_notification_result_identity(result, item)
-            except (LineInternalApiRetryableError, asyncio.TimeoutError):
+            except (LineInternalApiRetryableError, asyncio.TimeoutError) as error:
+                _failure(item, "dispatch", error)
                 state = NotificationOutboxState.RETRYABLE_FAILURE
-            except LineInternalApiPermanentError:
+            except LineInternalApiPermanentError as error:
+                _failure(item, "dispatch", error)
                 state = NotificationOutboxState.PERMANENT_FAILURE
             else:
                 state = NotificationOutboxState.ACCEPTED
+                logger.info("component=admin_notification stage=dispatch event=accepted command_id=%s operation_id=%s target_id=%s",
+                    item.command_id, item.operation_id, item.target_id)
             await self._repository.update_outbox_state(
                 service_id, operation_id, item.outbox_id, state, claim_token=item.claim_token
             )
@@ -103,7 +124,7 @@ class AdminLineResultReconciler:
                 result = await asyncio.wait_for(self._line_client.get_notification_result(item.command_id), timeout=30)
                 validate_notification_result_identity(result, item)
             except Exception as error:
-                logger.warning("Admin result polling failed: %s", type(error).__name__)
+                _failure(item, "result_poll", error)
                 if isinstance(error, LineNotificationResultNotFoundError):
                     # accepted means LINE committed the command. Missing provider
                     # delivery returns accepted/pending, not 404. Converge this

@@ -22,7 +22,11 @@ from app.contracts.admin_line_internal_v1 import (
 
 
 class LineInternalApiClientError(Exception):
-    pass
+    def __init__(self, message="", *, reason_category="unavailable", http_status=None):
+        super().__init__(message)
+        # Diagnostic metadata only; retry/permanent exception types are unchanged.
+        self.reason_category = reason_category
+        self.http_status = http_status
 
 
 class LineInternalApiConfigurationError(LineInternalApiClientError):
@@ -46,7 +50,7 @@ def validate_notification_result_identity(result, expected) -> None:
     if any(getattr(result, field, None) != getattr(expected, field) for field in (
         "command_id", "operation_id", "target_id", "external_member_id",
     )):
-        raise LineInternalApiRetryableError("LINE notification response identity mismatch")
+        raise LineInternalApiRetryableError("LINE notification response identity mismatch", reason_category="identity_mismatch")
     validate_notification_result_timestamps(result)
 
 
@@ -54,7 +58,7 @@ def validate_notification_result_timestamps(result) -> None:
     if getattr(result.status, "value", result.status) == "sent":
         sent_at = getattr(result, "sent_at", None)
         if not isinstance(sent_at, datetime) or sent_at.tzinfo is None or sent_at.utcoffset() is None:
-            raise LineInternalApiRetryableError("LINE sent result has no valid sent timestamp")
+            raise LineInternalApiRetryableError("LINE sent result has no valid sent timestamp", reason_category="contract")
 
 
 class HttpLineInternalApiClient:
@@ -89,7 +93,7 @@ class HttpLineInternalApiClient:
             NotificationResult, expected_status=200,
         )
         if result.command_id != command_id:
-            raise LineInternalApiRetryableError("LINE notification response identity mismatch")
+            raise LineInternalApiRetryableError("LINE notification response identity mismatch", reason_category="identity_mismatch")
         validate_notification_result_timestamps(result)
         return result
 
@@ -135,29 +139,30 @@ class HttpLineInternalApiClient:
             )
         except (httpx.TimeoutException, httpx.NetworkError) as error:
             raise LineInternalApiRetryableError(
-                "LINE internal API transport is unavailable"
+                "LINE internal API transport is unavailable",
+                reason_category="timeout" if isinstance(error, httpx.TimeoutException) else "connection",
             ) from error
         if response.status_code == 404 and method == "GET" and model is NotificationResult:
             raise LineNotificationResultNotFoundError(
-                "LINE notification result was not found (404)"
+                "LINE notification result was not found (404)", reason_category="not_found", http_status=404,
             )
         if response.status_code == 409 or 400 <= response.status_code < 500:
             raise LineInternalApiPermanentError(
-                f"LINE internal API rejected the request ({response.status_code})"
+                f"LINE internal API rejected the request ({response.status_code})", reason_category="http", http_status=response.status_code,
             )
         if response.status_code >= 500:
             raise LineInternalApiRetryableError(
-                f"LINE internal API is unavailable ({response.status_code})"
+                f"LINE internal API is unavailable ({response.status_code})", reason_category="http", http_status=response.status_code,
             )
         if response.status_code != expected_status:
             raise LineInternalApiPermanentError(
-                f"LINE internal API returned an unexpected status ({response.status_code})"
+                f"LINE internal API returned an unexpected status ({response.status_code})", reason_category="http", http_status=response.status_code,
             )
         try:
             return model.model_validate(response.json())
         except (ValueError, ValidationError) as error:
             raise LineInternalApiRetryableError(
-                "LINE internal API returned an invalid contract response"
+                "LINE internal API returned an invalid contract response", reason_category="contract",
             ) from error
 
     @staticmethod

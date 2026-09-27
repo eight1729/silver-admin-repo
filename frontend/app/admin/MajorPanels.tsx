@@ -54,11 +54,12 @@ export function JobSelectionPanel({ jobs, selectedJobId, selectedJob, loading, e
   </div>;
 }
 
-export function CandidateSelectionPanel({ job, candidates, selected, notificationType, setNotificationType, toggle, begin, busy, error, retry, targetsPending, singleRecipient, editable, filter, setFilter }: {
+export function CandidateSelectionPanel({ job, candidates, selected, notificationType, notificationTypeLocked, setNotificationType, toggle, begin, busy, error, retry, targetsPending, singleRecipient, editable, filter, setFilter }: {
   job: AdminJobDetail;
   candidates: AdminCandidate[];
   selected: Set<string>;
   notificationType: NotificationType;
+  notificationTypeLocked: boolean;
   setNotificationType: (value: NotificationType) => void;
   toggle: (id: string) => void;
   begin: () => Promise<void>;
@@ -99,7 +100,7 @@ export function CandidateSelectionPanel({ job, candidates, selected, notificatio
     </tbody></table></div>}
     {visibleCandidates.length > 0 && <div className="candidate-pagination" aria-label="候補会員のページ切り替え"><span>{(currentPage - 1) * pageSize + 1}〜{Math.min(currentPage * pageSize, visibleCandidates.length)} / {visibleCandidates.length}件</span><div><button type="button" className="admin-button secondary compact" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>前へ</button>{Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => <button type="button" className={`candidate-page-button${pageNumber === currentPage ? " is-current" : ""}`} aria-current={pageNumber === currentPage ? "page" : undefined} onClick={() => setPage(pageNumber)} key={pageNumber}>{pageNumber}</button>)}<button type="button" className="admin-button secondary compact" disabled={currentPage === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>次へ</button></div></div>}
     <div className="candidate-list-link-row"><a className="admin-link" href={`/admin/members?jobId=${encodeURIComponent(job.job_id)}`}>会員一覧へ <span aria-hidden="true">↗</span></a></div>
-    {editable && <><div className="candidate-footer-actions"><label><span>通知種別</span><select value={notificationType} onChange={(event) => setNotificationType(event.target.value as NotificationType)}><option value="new_job_match">新着求人マッチ</option><option value="existing_job_match">既存求人マッチ</option><option value="custom_job">個別求人</option></select></label><button className="admin-button candidate-primary-compact" type="button" disabled={busy || selected.size === 0 || (singleRecipient && selected.size !== 1) || job.status !== "published"} onClick={() => void begin()}>{busy ? "対象を保存中…" : targetsPending ? "対象会員の保存を再試行" : "対象を保存して通知文編集へ"}</button></div>
+    {editable && <><div className="candidate-footer-actions"><label><span>通知種別</span><select value={notificationType} disabled={notificationTypeLocked || busy} onChange={(event) => { if (!notificationTypeLocked && !busy) setNotificationType(event.target.value as NotificationType); }}><option value="new_job_match">新着求人マッチ</option><option value="existing_job_match">既存求人マッチ</option><option value="custom_job">個別求人</option></select></label><button className="admin-button candidate-primary-compact" type="button" disabled={busy || selected.size === 0 || (singleRecipient && selected.size !== 1) || job.status !== "published"} onClick={() => void begin()}>{busy ? "対象を保存中…" : targetsPending ? "対象会員の保存を再試行" : "対象を保存して通知文編集へ"}</button></div>
       {targetsPending && <div className="admin-info" role="status">operationは作成済みです。対象会員の保存を再試行してください。</div>}
       {singleRecipient && <p className="candidate-limit-note" role="note">実LINE検証では1名だけ選択できます。選択済みの会員を解除すると別の会員を選べます。</p>}</>}
     {!editable && <p className="panel-guidance">対象を変更する場合は、送信前確認から「対象変更」を選択してください。</p>}

@@ -1077,7 +1077,18 @@ class NotificationService:
         # Reserve the send atomically. The persistent adapter repeats the
         # duplicate check while holding the operation row lock.
         if self._reservation_guard is not None:
-            await self._reservation_guard(command.service_id, sendable_count)
+            try:
+                await self._reservation_guard(command.service_id, sendable_count)
+            except OperationNotSendableError as error:
+                reason = getattr(error, "reason_category", None)
+                if not isinstance(reason, str) or reason not in {"line_capability_unavailable", "line_send_not_ready", "line_recipient_limit_exceeded"}:
+                    reason = "capability_rejected"
+                mode = getattr(error, "capability_mode", None)
+                if not isinstance(mode, str) or mode not in {"disabled", "staging_live", "production_live"}:
+                    mode = "unavailable"
+                _logger.warning("component=admin_notification stage=capability event=rejected operation_id=%s reason_category=%s capability_mode=%s",
+                    command.operation_id, reason, mode)
+                raise
         try:
             updated, _stored_deliveries = await self._repository.begin_send_attempt(
                 command.service_id,
@@ -1153,8 +1164,8 @@ class NotificationService:
                 # This audit is auxiliary and occurs after the send-intent
                 # transaction committed. Its failure cannot undo acceptance.
                 _logger.error(
-                    "enqueue_failed audit append failed (%s)",
-                    type(audit_error).__name__,
+                    "component=admin_notification stage=audit event=failed reason_category=audit_append_failed operation_id=%s",
+                    command.operation_id,
                 )
             return restored
 

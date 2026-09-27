@@ -123,7 +123,7 @@ test("send confirmation is a compact four-row summary with conditional safe deta
   assert.match(text, /検証中/);
   assert.match(text, /send-problem-details" role="alert"/);
   assert.match(text, /new Set<string>\(\)/);
-  assert.match(text, /送信後は取り消せません。実LINE検証は送信可能な1名に限定されます/);
+  assert.match(text, /送信後は取り消せません。現在の送信モードと送信可能な対象者を確認してください。/);
   assert.match(text, /formatBlockingReasons\(lineSendMode\)/);
   assert.doesNotMatch(text, /<h3>4\. 送信モード|<h3>5\. 注意事項|通知内容の確認|実LINE送信可能：/);
   const css = await readFile(new URL("./admin.css", import.meta.url), "utf8");
