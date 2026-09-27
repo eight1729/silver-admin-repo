@@ -1,6 +1,6 @@
 import { ADMIN_API_BASE } from "./admin-config";
 
-export type JobStatus = "draft" | "published" | "closed" | "suspended";
+export type JobStatus = "draft" | "published" | "paused" | "closed" | "cancelled" | "unknown";
 export type NotificationType = "new_job_match" | "existing_job_match" | "custom_job";
 export type OperationStatus = "draft" | "validating" | "ready" | "blocked_external_system" | "sending" | "completed" | "completed_with_errors" | "cancelled";
 export type DeliveryStatus = "pending" | "sent" | "failed" | "unknown" | "skipped";

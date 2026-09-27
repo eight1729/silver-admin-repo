@@ -227,5 +227,4 @@ export function WorkflowStateNotice({ state, reason }: { state: NotificationUiSt
   return <div className={`workflow-state workflow-state--${state}`} role="status"><strong>{presentation.label}</strong><span>{reason ?? presentation.description}</span></div>;
 }
 
-function jobStatusLabel(status: string) { return ({ published: "募集中", closed: "募集終了", draft: "下書き", suspended: "停止中" } as Record<string, string>)[status] ?? "状態不明"; }
 function safeReasonLabel(reason: string) { return ({ line_not_linked: "LINE未連携", not_selected: "未選択", member_ineligible: "通知対象外", job_closed: "求人募集終了", job_version_changed: "求人情報更新あり", recipient_unavailable: "送信先を利用できません", line_temporary_error: "一時的な送信エラー", line_unknown_result: "送信結果不明" } as Record<string, string>)[reason] ?? "条件を確認してください"; }

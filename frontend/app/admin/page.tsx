@@ -9,7 +9,9 @@ import {
   type AdminLineSendMode, type AdminOperation, type AdminValidation, type NotificationType,
 } from "../lib/admin-api";
 import { ADMIN_HOME_EVENT } from "./AdminHomeButton";
-import { clearedTransientAdminState, createOrSaveTargets, reloadDeliveryResults, restoreAdminOperation, saveThenValidate, sendThenLoadDeliveries } from "./admin-workflow";
+import { createDeliveryRefresh } from "./delivery-refresh";
+import { jobStatusLabel } from "./job-status";
+import { clearedTransientAdminState, createOrSaveTargets, restoreAdminOperation, saveThenValidate, sendThenLoadDeliveries } from "./admin-workflow";
 import { AdminPanel } from "./AdminPanel";
 import { AdminShell } from "./AdminShell";
 import { CandidateFilterMenu, CandidateSelectionPanel, JobSelectionPanel, MessageEditorPanel, MessageReadOnlySummary, SendConfirmationPanel, SendPreparationState } from "./MajorPanels";
@@ -54,6 +56,7 @@ export default function AdminPage() {
   const [candidatesError, setCandidatesError] = useState(false);
   const [targetsPending, setTargetsPending] = useState(false);
   const [deliveriesLoading, setDeliveriesLoading] = useState(false);
+  const [restoringOperation, setRestoringOperation] = useState(true);
   const [deliveriesError, setDeliveriesError] = useState("");
   const [queueFailure, setQueueFailure] = useState(false);
   const [lineSendMode, setLineSendMode] = useState<AdminLineSendMode | null>(null);
@@ -74,6 +77,7 @@ export default function AdminPage() {
   const notificationLinkRef = useRef<string | null>(null);
   const workflowLock = useRef(false);
   const historySequence = useRef(0);
+  const deliveryRefresh = useRef<ReturnType<typeof createDeliveryRefresh> | null>(null);
 
   const validationInput = useMemo<ValidationInput>(() => ({
     jobId: selectedJobId,
@@ -87,7 +91,7 @@ export default function AdminPage() {
   validationInputRef.current = validationInput;
   const validationCurrent = isValidationSnapshotCurrent(validationSnapshot, validationInput);
   const currentDeliveries = operation && deliveriesOperationId === operation.operation_id ? deliveries : null;
-  const hasTerminalDelivery = Boolean(currentDeliveries?.items.some((item) => item.status === "sent" || item.status === "failed" || item.status === "unknown" || item.status === "skipped"));
+  const hasTerminalDelivery = Boolean(currentDeliveries?.items.length && currentDeliveries.items.every((item) => item.status === "sent" || item.status === "failed" || item.status === "unknown" || item.status === "skipped"));
   const workflowState = deriveNotificationUiState({
     hasJob: Boolean(job), selectedCount: selected.size,
     messageValid: Object.values(message).every((value) => value.trim()),
@@ -99,6 +103,30 @@ export default function AdminPage() {
     hasTerminalDelivery, queueFailure,
   });
   notificationLinkRef.current = notificationLink;
+
+  const refreshOperationId = operation?.operation_id;
+  const refreshEnabled = Boolean(operation && !busy && !loading && !deliveriesLoading && !restoringOperation);
+  useEffect(() => {
+    if (!refreshEnabled || !operation) return;
+    const refresh = createDeliveryRefresh({
+      operation, deliveries: currentDeliveries,
+      getOperation: adminApi.operation, getDeliveries: adminApi.deliveries,
+      onUpdate: (nextOperation, nextDeliveries) => {
+        if (validationInputRef.current.operationId !== nextOperation.operation_id) return;
+        setOperation(nextOperation); setDeliveries(nextDeliveries);
+        setDeliveriesOperationId(nextOperation.operation_id); setDeliveriesError("");
+        setStep("result");
+      },
+      onError: () => {
+        if (validationInputRef.current.operationId === operation.operation_id)
+          setDeliveriesError("配信結果を取得できませんでした。しばらくして再読み込みしてください。");
+      },
+    });
+    deliveryRefresh.current = refresh;
+    return () => { refresh.stop(); if (deliveryRefresh.current === refresh) deliveryRefresh.current = null; };
+    // The loop owns subsequent snapshots; rendering them must not restart its timer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshOperationId, refreshEnabled]);
 
   const showError = (value: unknown) => setError(adminErrorMessage(value));
   const clearFeedback = () => { setError(""); setSuccess(""); };
@@ -125,6 +153,7 @@ export default function AdminPage() {
       try { setSelected(new Set(JSON.parse(savedSelected) as string[])); } catch { sessionStorage.removeItem(SELECTED_KEY); }
     }
     if (saved) {
+      setRestoringOperation(true);
       void restoreAdminOperation({
         operationId: saved,
         getOperation: (id) => adminApi.operation(id, controller.signal),
@@ -158,8 +187,8 @@ export default function AdminPage() {
         else if (result.candidatesError) showError(result.candidatesError);
         setDeliveries(result.deliveries); setDeliveriesOperationId(result.deliveries ? result.operation.operation_id : null);
         if (result.deliveryError) setDeliveriesError("配信結果を取得できませんでした。配信結果だけを再読み込みしてください。");
-      });
-    }
+      }).finally(() => { if (active) setRestoringOperation(false); });
+    } else setRestoringOperation(false);
     return () => { active = false; controller.abort(); };
   }, [loadJobs]);
 
@@ -426,15 +455,7 @@ export default function AdminPage() {
   }
 
   async function loadDeliveriesOnly() {
-    if (!operation || deliveriesLoading) return;
-    const operationId = operation.operation_id;
-    setDeliveriesLoading(true); setDeliveriesError("");
-    try {
-    const result = await reloadDeliveryResults({ operation, actions: { sendOperation: adminApi.send, getDeliveries: adminApi.deliveries } });
-    if (validationInputRef.current.operationId !== operationId) return;
-    setOperation(result.operation); setDeliveries(result.deliveries); setDeliveriesOperationId(result.deliveries ? operationId : null);
-    if (result.deliveryError) setDeliveriesError("配信結果を取得できませんでした。しばらくして再読み込みしてください。");
-    } finally { setDeliveriesLoading(false); }
+    await deliveryRefresh.current?.refresh();
   }
 
   function recordSessionEvent(operationId: string, name: string, status: string, description: string) {
@@ -513,7 +534,7 @@ function Result({ operation, deliveries, deliveriesLoading, deliveriesError, ret
 
 function Summary({ label, value }: { label: string; value: number }) { return <div className="summary-item"><strong>{value}</strong><br/><span>{label}</span></div>; }
 function stepTitle(step: Step) { return ({ jobs:"求人一覧",detail:"求人詳細・候補選択",edit:"通知文編集",confirm:"validate結果・送信前確認",result:"送信結果" })[step]; }
-function jobStatus(value: string) { return ({ published:"募集中",closed:"終了",draft:"下書き",suspended:"停止中" } as Record<string,string>)[value] ?? value; }
+function jobStatus(value: AdminJobSummary["status"]) { return value === "closed" ? "終了" : jobStatusLabel(value); }
 function statusLabel(value: string) { return ({ draft:"下書き",validating:"確認中",ready:"送信準備完了",blocked_external_system:"外部情報確認不可",sending:"送信処理中",completed:"完了",completed_with_errors:"一部エラーで完了",cancelled:"取消",sent:"送信済み",failed:"失敗",unknown:"結果不明",skipped:"対象外",pending:"処理待ち" } as Record<string,string>)[value] ?? value; }
 function notificationTypeLabel(value: NotificationType) { return ({ new_job_match:"新着求人マッチ",existing_job_match:"既存求人マッチ",custom_job:"個別求人" })[value]; }
 function reasonLabel(value: string | null) { if (!value) return "—"; return ({ line_not_linked:"LINE未連携",not_selected:"未選択",member_ineligible:"対象外",job_closed:"求人終了",job_version_changed:"求人version変更",recipient_unavailable:"送信先を利用できません",line_temporary_error:"一時的な送信エラー",line_unknown_result:"送信結果不明" } as Record<string,string>)[value] ?? "対象条件を満たしません"; }
