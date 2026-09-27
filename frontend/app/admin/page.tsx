@@ -9,8 +9,10 @@ import {
   type AdminLineSendMode, type AdminOperation, type AdminValidation, type NotificationType,
 } from "../lib/admin-api";
 import { ADMIN_HOME_EVENT } from "./AdminHomeButton";
-import { useAdminEnvironment } from "./AdminEnvironment";
-import { clearedTransientAdminState, createOrSaveTargets, reloadDeliveryResults, restoreAdminOperation, saveThenValidate, sendThenLoadDeliveries } from "./admin-workflow";
+import { createDeliveryRefresh } from "./delivery-refresh";
+import { jobStatusLabel } from "./job-status";
+import { toggleCandidateSelection } from "./candidate-selection";
+import { clearedTransientAdminState, createOrSaveTargets, restoreAdminOperation, saveThenValidate, sendThenLoadDeliveries } from "./admin-workflow";
 import { AdminPanel } from "./AdminPanel";
 import { AdminShell } from "./AdminShell";
 import { CandidateFilterMenu, CandidateSelectionPanel, JobSelectionPanel, MessageEditorPanel, MessageReadOnlySummary, SendConfirmationPanel, SendPreparationState } from "./MajorPanels";
@@ -32,7 +34,6 @@ const initialMessage: AdminMessage = {
 };
 
 export default function AdminPage() {
-  const { allowDemoReset } = useAdminEnvironment();
   const [step, setStep] = useState<Step>("jobs");
   const [jobs, setJobs] = useState<AdminJobSummary[]>([]);
   const [job, setJob] = useState<AdminJobDetail | null>(null);
@@ -56,6 +57,7 @@ export default function AdminPage() {
   const [candidatesError, setCandidatesError] = useState(false);
   const [targetsPending, setTargetsPending] = useState(false);
   const [deliveriesLoading, setDeliveriesLoading] = useState(false);
+  const [restoringOperation, setRestoringOperation] = useState(true);
   const [deliveriesError, setDeliveriesError] = useState("");
   const [queueFailure, setQueueFailure] = useState(false);
   const [lineSendMode, setLineSendMode] = useState<AdminLineSendMode | null>(null);
@@ -67,7 +69,6 @@ export default function AdminPage() {
   const [templateGeneratedMessage, setTemplateGeneratedMessage] = useState<AdminMessage | null>(null);
   const [pendingTemplate, setPendingTemplate] = useState<SelectedTemplateId | null>(null);
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
-  const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
   const [centerDisplayName, setCenterDisplayName] = useState(DEFAULT_CENTER_DISPLAY_NAME);
   const [centerDisplayNameDraft, setCenterDisplayNameDraft] = useState(DEFAULT_CENTER_DISPLAY_NAME);
   const [noticeDraft, setNoticeDraft] = useState(initialMessage.note);
@@ -77,6 +78,7 @@ export default function AdminPage() {
   const notificationLinkRef = useRef<string | null>(null);
   const workflowLock = useRef(false);
   const historySequence = useRef(0);
+  const deliveryRefresh = useRef<ReturnType<typeof createDeliveryRefresh> | null>(null);
 
   const validationInput = useMemo<ValidationInput>(() => ({
     jobId: selectedJobId,
@@ -90,9 +92,10 @@ export default function AdminPage() {
   validationInputRef.current = validationInput;
   const validationCurrent = isValidationSnapshotCurrent(validationSnapshot, validationInput);
   const currentDeliveries = operation && deliveriesOperationId === operation.operation_id ? deliveries : null;
-  const hasTerminalDelivery = Boolean(currentDeliveries?.items.some((item) => item.status === "sent" || item.status === "failed" || item.status === "unknown" || item.status === "skipped"));
+  const hasTerminalDelivery = Boolean(currentDeliveries?.items.length && currentDeliveries.items.every((item) => item.status === "sent" || item.status === "failed" || item.status === "unknown" || item.status === "skipped"));
   const workflowState = deriveNotificationUiState({
     hasJob: Boolean(job), selectedCount: selected.size,
+    maxRecipients: lineSendMode?.max_recipients ?? null,
     messageValid: Object.values(message).every((value) => value.trim()),
     operation, validation, validationCurrent,
     validationWasInvalidated: validationInvalidation !== null,
@@ -102,6 +105,30 @@ export default function AdminPage() {
     hasTerminalDelivery, queueFailure,
   });
   notificationLinkRef.current = notificationLink;
+
+  const refreshOperationId = operation?.operation_id;
+  const refreshEnabled = Boolean(operation && !busy && !loading && !deliveriesLoading && !restoringOperation);
+  useEffect(() => {
+    if (!refreshEnabled || !operation) return;
+    const refresh = createDeliveryRefresh({
+      operation, deliveries: currentDeliveries,
+      getOperation: adminApi.operation, getDeliveries: adminApi.deliveries,
+      onUpdate: (nextOperation, nextDeliveries) => {
+        if (validationInputRef.current.operationId !== nextOperation.operation_id) return;
+        setOperation(nextOperation); setDeliveries(nextDeliveries);
+        setDeliveriesOperationId(nextOperation.operation_id); setDeliveriesError("");
+        setStep("result");
+      },
+      onError: () => {
+        if (validationInputRef.current.operationId === operation.operation_id)
+          setDeliveriesError("配信結果を取得できませんでした。しばらくして再読み込みしてください。");
+      },
+    });
+    deliveryRefresh.current = refresh;
+    return () => { refresh.stop(); if (deliveryRefresh.current === refresh) deliveryRefresh.current = null; };
+    // The loop owns subsequent snapshots; rendering them must not restart its timer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshOperationId, refreshEnabled]);
 
   const showError = (value: unknown) => setError(adminErrorMessage(value));
   const clearFeedback = () => { setError(""); setSuccess(""); };
@@ -128,6 +155,7 @@ export default function AdminPage() {
       try { setSelected(new Set(JSON.parse(savedSelected) as string[])); } catch { sessionStorage.removeItem(SELECTED_KEY); }
     }
     if (saved) {
+      setRestoringOperation(true);
       void restoreAdminOperation({
         operationId: saved,
         getOperation: (id) => adminApi.operation(id, controller.signal),
@@ -161,8 +189,8 @@ export default function AdminPage() {
         else if (result.candidatesError) showError(result.candidatesError);
         setDeliveries(result.deliveries); setDeliveriesOperationId(result.deliveries ? result.operation.operation_id : null);
         if (result.deliveryError) setDeliveriesError("配信結果を取得できませんでした。配信結果だけを再読み込みしてください。");
-      });
-    }
+      }).finally(() => { if (active) setRestoringOperation(false); });
+    } else setRestoringOperation(false);
     return () => { active = false; controller.abort(); };
   }, [loadJobs]);
 
@@ -270,16 +298,18 @@ export default function AdminPage() {
   }
 
   function toggle(memberId: string) {
-    const next = selected.has(memberId) ? new Set<string>() : new Set([memberId]);
+    if (busy || step !== "detail" || workflowState.terminal) return;
+    if (!selected.has(memberId) && !candidates.some((candidate) => candidate.member_id === memberId && candidate.eligible)) return;
+    const next = toggleCandidateSelection(selected, memberId, lineSendMode?.max_recipients ?? null);
     if (memberSelectionsEqual(selected, next)) return;
     setSelected(next); setValidationSnapshot(null); setDeliveries(null); setDeliveriesError(""); setQueueFailure(false);
     if (validation || validationSnapshot || operation?.status === "ready") setValidationInvalidation("対象会員が変更されたため、再検証が必要です。");
   }
 
   function changeNotificationType(next: NotificationType) {
-    if (next === notificationType) return;
+    if (operation || busy || next === notificationType) return;
     setNotificationType(next); setValidationSnapshot(null); setDeliveries(null); setDeliveriesError("");
-    if (validation || validationSnapshot || operation?.status === "ready") setValidationInvalidation("通知種別が変更されたため、再検証が必要です。");
+    if (validation || validationSnapshot) setValidationInvalidation("通知種別が変更されたため、再検証が必要です。");
   }
 
   function changeMessage(next: AdminMessage) {
@@ -352,7 +382,7 @@ export default function AdminPage() {
   }
 
   async function beginOperation() {
-    if (!job || selected.size === 0 || busy) return;
+    if (!job || selected.size === 0 || busy || (lineSendMode?.max_recipients != null && selected.size > lineSendMode.max_recipients)) return;
     setBusy(true); clearFeedback();
     try {
       const current = await createOrSaveTargets({
@@ -361,12 +391,12 @@ export default function AdminPage() {
         selectedMemberIds: [...selected], create: adminApi.createOperation,
         saveTargets: adminApi.updateTargets, reload: adminApi.operation,
         onCreated: (created) => {
-          setOperation(created); setTargetsPending(true);
+          setOperation(created); setNotificationType(created.notification_type); setTargetsPending(true);
           sessionStorage.setItem(STORAGE_KEY, created.operation_id);
           sessionStorage.setItem(SELECTED_KEY, JSON.stringify([...selected]));
         },
       });
-      setOperation(current); setTargetsPending(false); setValidation(null);
+      setOperation(current); setNotificationType(current.notification_type); setTargetsPending(false); setValidation(null);
       sessionStorage.setItem(SELECTED_KEY, JSON.stringify([...selected]));
       setSuccess("対象者を保存しました。"); setStep("edit");
     } catch (e) {
@@ -429,30 +459,7 @@ export default function AdminPage() {
   }
 
   async function loadDeliveriesOnly() {
-    if (!operation || deliveriesLoading) return;
-    const operationId = operation.operation_id;
-    setDeliveriesLoading(true); setDeliveriesError("");
-    try {
-    const result = await reloadDeliveryResults({ operation, actions: { sendOperation: adminApi.send, getDeliveries: adminApi.deliveries } });
-    if (validationInputRef.current.operationId !== operationId) return;
-    setOperation(result.operation); setDeliveries(result.deliveries); setDeliveriesOperationId(result.deliveries ? operationId : null);
-    if (result.deliveryError) setDeliveriesError("配信結果を取得できませんでした。しばらくして再読み込みしてください。");
-    } finally { setDeliveriesLoading(false); }
-  }
-
-  async function reset() {
-    if (busy) return;
-    setResetConfirmationOpen(false);
-    setBusy(true); clearFeedback();
-    try {
-      await adminApi.reset(); sessionStorage.removeItem(STORAGE_KEY); sessionStorage.removeItem(SELECTED_KEY);
-      setOperation(null); setValidation(null); setDeliveries(null); setJob(null); setCandidates([]); setSelected(new Set()); setMessage(initialMessage); setTargetsPending(false); setDeliveriesError(""); setQueueFailure(false); setStep("jobs");
-      setSelectedTemplate("standard"); setTemplateGeneratedMessage(null); setCenterDisplayName(DEFAULT_CENTER_DISPLAY_NAME); setCenterDisplayNameDraft(DEFAULT_CENTER_DISPLAY_NAME);
-      setDeliveriesOperationId(null); setSessionHistory([]);
-      workflowLock.current = false; setValidationSnapshot(null); setValidationInvalidation(null); setWorkflowAction("idle"); notificationLinkRef.current = null; setNotificationLink(null);
-      await loadJobs(); setSuccess("デモデータをリセットしました。");
-    } catch (e) { showError(e); }
-    finally { setBusy(false); }
+    await deliveryRefresh.current?.refresh();
   }
 
   function recordSessionEvent(operationId: string, name: string, status: string, description: string) {
@@ -461,7 +468,6 @@ export default function AdminPage() {
   }
 
   return <AdminShell mode={lineSendMode}><main className="admin-main">
-    {allowDemoReset && <div className="admin-toolbar-actions"><button className="admin-button danger" onClick={() => setResetConfirmationOpen(true)} disabled={busy}>デモデータをリセット</button></div>}
     <div className="sr-status" aria-live="polite">{loading || busy ? "処理中です…" : ""}</div>
     {error && <div className="admin-error" role="alert">{error}</div>}
     {success && <div className="admin-success" role="status">{success}</div>}
@@ -473,7 +479,7 @@ export default function AdminPage() {
       <JobSelectionPanel jobs={jobs} selectedJobId={selectedJobId} selectedJob={job} loading={loading} error={jobsError} busy={busy || workflowAction === "sending"} retry={() => void loadJobs()} select={async (jobId) => requestJobSelection(jobId)} />
     </AdminPanel>
     <AdminPanel number={2} title="対象候補会員" badge={job ? `${job.title}・${candidates.length}人` : undefined} actions={job ? <CandidateFilterMenu value={candidateFilter} onChange={setCandidateFilter} /> : undefined}>
-      {!selectedJobId ? <p className="admin-panel-empty">求人を選択すると、通知候補会員を読み込みます。</p> : !job ? <div className={detailError ? "admin-error" : "admin-info"} role={detailError ? "alert" : "status"}>{detailError ? <><p>選択求人の詳細を取得できませんでした。</p><button className="admin-button secondary" disabled={busy} onClick={() => void retryDetail()}>求人詳細を再読み込み</button></> : "選択求人を読み込んでいます。"}</div> : <CandidateSelectionPanel job={job} candidates={candidates} selected={selected} notificationType={notificationType} setNotificationType={changeNotificationType} toggle={toggle} begin={beginOperation} busy={busy} error={candidatesError} retry={retryCandidates} targetsPending={targetsPending} singleRecipient={lineSendMode?.max_recipients === 1} editable={step === "detail" && !workflowState.terminal} filter={candidateFilter} setFilter={setCandidateFilter} />}
+      {!selectedJobId ? <p className="admin-panel-empty">求人を選択すると、通知候補会員を読み込みます。</p> : !job ? <div className={detailError ? "admin-error" : "admin-info"} role={detailError ? "alert" : "status"}>{detailError ? <><p>選択求人の詳細を取得できませんでした。</p><button className="admin-button secondary" disabled={busy} onClick={() => void retryDetail()}>求人詳細を再読み込み</button></> : "選択求人を読み込んでいます。"}</div> : <CandidateSelectionPanel job={job} candidates={candidates} selected={selected} notificationType={operation?.notification_type ?? notificationType} notificationTypeLocked={operation !== null} setNotificationType={changeNotificationType} toggle={toggle} begin={beginOperation} busy={busy} error={candidatesError} retry={retryCandidates} targetsPending={targetsPending} maxRecipients={lineSendMode?.max_recipients ?? null} editable={step === "detail" && !workflowState.terminal} filter={candidateFilter} setFilter={setCandidateFilter} />}
     </AdminPanel>
     </div>
     <AdminPanel number={3} title="通知文編集" badge={job?.title} status={workflowState.state === "stale" ? "再検証が必要" : step === "edit" ? "現在の操作" : operation ? "下書きあり" : "未準備"}>
@@ -494,7 +500,6 @@ export default function AdminPage() {
     </div>
     {pendingTemplate && <Modal title="通知テンプレートを変更しますか？" onClose={() => setPendingTemplate(null)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setPendingTemplate(null)}>キャンセル</button><button className="admin-button" type="button" onClick={() => commitTemplate(pendingTemplate)}>テンプレートを適用</button></>}><p>現在の通知本文は、選択したテンプレートの内容で置き換えられます。</p></Modal>}
     {pendingJobId && <Modal title="求人を変更しますか？" onClose={() => setPendingJobId(null)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setPendingJobId(null)}>キャンセル</button><button className="admin-button danger" type="button" onClick={() => void switchToJob(pendingJobId)}>求人を変更する</button></>}><p>求人を変更すると、現在の通知本文、対象会員、検証結果は破棄されます。保存済みの旧通知履歴は削除されません。</p></Modal>}
-    {resetConfirmationOpen && <Modal title="デモデータをリセットしますか？" onClose={() => setResetConfirmationOpen(false)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setResetConfirmationOpen(false)}>キャンセル</button><button className="admin-button danger" type="button" onClick={() => void reset()}>リセットする</button></>}><p>通知operation、対象者、送信結果、監査履歴を消去します。fixture求人は残ります。</p></Modal>}
   </main></AdminShell>;
 }
 
@@ -522,18 +527,17 @@ function Preview({ job, message, lineSendMode, notificationLink }: { job: AdminJ
 function Confirmation({ job, operation, validation, candidates, selected, send, revalidate, busy, edit, targets, lineSendMode, notificationLink }: { job: AdminJobDetail; operation: AdminOperation; validation: AdminValidation; candidates: AdminCandidate[]; selected: Set<string>; send: () => Promise<void>; revalidate: () => Promise<void>; busy: boolean; edit: () => void; targets: () => void; lineSendMode: AdminLineSendMode | null; notificationLink: string | null }) {
   const live = isLiveMode(lineSendMode);
   const ready = live && canAttemptSend(lineSendMode);
-  const oneRecipient = validation.selected_count === 1 && validation.sendable_count === 1;
   return <><p className="fake-warning">{sendWarning(lineSendMode)}</p><section className="admin-card"><h2>送信前確認</h2><p><strong>{job.title}</strong>（version {job.version}）</p><p>通知種別：{notificationTypeLabel(operation.notification_type)}</p><p>求人リンク：{ready ? notificationLink ?? "取得できません" : job.job_url}</p><div className="summary-grid"><Summary label="選択" value={validation.selected_count}/><Summary label="送信可能" value={validation.sendable_count}/><Summary label="skipped予定" value={validation.skipped_count}/></div>{lineSendMode?.max_recipients != null && validation.sendable_count > lineSendMode.max_recipients && <div className="admin-error">送信上限は{lineSendMode.max_recipients}名です。</div>}{live && !ready && <div className="admin-error">実LINE送信設定を確認してください。</div>}{validation.version_changed && <div className="admin-error">求人versionが変更されています。</div>}{!validation.can_proceed && <div className="admin-error">この状態では送信できません。{validation.reasons.map(reasonLabel).join("、")}</div>}<h3>対象者</h3><ul>{candidates.filter((x) => selected.has(x.member_id)).map((x) => <li key={x.member_id}>{x.display_name} — {x.line_linked ? "送信対象" : "LINE未連携・skipped予定"}</li>)}</ul><h3>完成した通知文</h3><div className="preview-bubble">{ready && safetyPrefix(lineSendMode)}{ready && safetyPrefix(lineSendMode) && "\n\n"}{operation.message.greeting}{"\n\n"}{operation.message.introduction}{"\n\n"}{operation.message.note}</div><p className="admin-muted">送信時にもBackendで再validateされます。この結果だけを永続的な送信許可として扱いません。</p><div className="admin-actions"><button className="admin-button secondary" onClick={edit}>文面編集へ戻る</button><button className="admin-button secondary" onClick={targets}>対象変更へ戻る</button><button className="admin-button secondary" disabled={busy} onClick={() => void revalidate()}>再validate</button><button className="admin-button" disabled={busy || !validation.can_proceed || operation.status !== "ready" || !canAttemptSend(lineSendMode, validation.sendable_count) || (live && (!ready || !notificationLink))} onClick={() => void send()}>{busy ? "送信中…" : `${modePresentation(lineSendMode).label}を実行`}</button></div></section></>;
 }
 
 function Result({ operation, deliveries, deliveriesLoading, deliveriesError, retry, lineSendMode }: { operation: AdminOperation; deliveries: AdminDeliveries | null; deliveriesLoading: boolean; deliveriesError: string; retry: () => Promise<void>; lineSendMode: AdminLineSendMode | null }) {
-  const title = lineSendMode?.mode === "fake" ? "Fake送信結果" : "通知送信結果";
+  const title = "通知送信結果";
   return <><section className="admin-card"><h2>{title}</h2><span className="admin-status">{statusLabel(operation.status)}</span><p>完了時刻：{formatTime(operation.completed_at)}</p>{operation.status === "completed_with_errors" && <div className="admin-error">一部の通知でエラーまたは結果不明がありました。</div>}<p className="admin-muted">再送・retry機能はありません。unknownは自動再送されません。</p></section>{deliveriesLoading && <div className="admin-info">配信結果を読み込んでいます。</div>}{deliveriesError && <div className="admin-error">{deliveriesError}<button className="admin-button secondary" disabled={deliveriesLoading} onClick={() => void retry()}>配信結果を再読み込み</button></div>}{deliveries ? <section className="admin-card admin-section"><h2>配信結果</h2><div className="summary-grid">{(["sent","failed","unknown","skipped","pending"] as const).map((status) => <Summary key={status} label={statusLabel(status)} value={deliveries.summary[status]}/>)}</div><p>合計 {deliveries.items.length}件</p><div className="delivery-list">{deliveries.items.map((item) => <div className="delivery" key={item.delivery_id}><div><strong>{item.member_id}</strong><br/><span className="admin-muted">{item.status === "unknown" ? "結果不明・自動再送なし" : reasonLabel(item.reason_code)}</span></div><div><span className="admin-status">{statusLabel(item.status)}</span><br/><small>{formatTime(item.sent_at ?? item.updated_at)}</small></div></div>)}</div></section> : !deliveriesError && !deliveriesLoading && <div className="admin-info">配信結果はありません。</div>}</>;
 }
 
 function Summary({ label, value }: { label: string; value: number }) { return <div className="summary-item"><strong>{value}</strong><br/><span>{label}</span></div>; }
 function stepTitle(step: Step) { return ({ jobs:"求人一覧",detail:"求人詳細・候補選択",edit:"通知文編集",confirm:"validate結果・送信前確認",result:"送信結果" })[step]; }
-function jobStatus(value: string) { return ({ published:"募集中",closed:"終了",draft:"下書き",suspended:"停止中" } as Record<string,string>)[value] ?? value; }
+function jobStatus(value: AdminJobSummary["status"]) { return value === "closed" ? "終了" : jobStatusLabel(value); }
 function statusLabel(value: string) { return ({ draft:"下書き",validating:"確認中",ready:"送信準備完了",blocked_external_system:"外部情報確認不可",sending:"送信処理中",completed:"完了",completed_with_errors:"一部エラーで完了",cancelled:"取消",sent:"送信済み",failed:"失敗",unknown:"結果不明",skipped:"対象外",pending:"処理待ち" } as Record<string,string>)[value] ?? value; }
 function notificationTypeLabel(value: NotificationType) { return ({ new_job_match:"新着求人マッチ",existing_job_match:"既存求人マッチ",custom_job:"個別求人" })[value]; }
 function reasonLabel(value: string | null) { if (!value) return "—"; return ({ line_not_linked:"LINE未連携",not_selected:"未選択",member_ineligible:"対象外",job_closed:"求人終了",job_version_changed:"求人version変更",recipient_unavailable:"送信先を利用できません",line_temporary_error:"一時的な送信エラー",line_unknown_result:"送信結果不明" } as Record<string,string>)[value] ?? "対象条件を満たしません"; }

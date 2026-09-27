@@ -10,7 +10,6 @@ from app.api.admin_entry_deps import (
 )
 from app.api.admin_auth import (
     require_admin_operator,
-    require_admin_role,
     require_admin_viewer,
 )
 from app.application.admin_service import (
@@ -48,7 +47,6 @@ from app.schemas.admin import (
     AdminOperationCreateRequest,
     AdminOperationResponse,
     AdminOperationUpdateRequest,
-    AdminResetResponse,
     AdminTargetsUpdateRequest,
     AdminValidationResponse,
 )
@@ -397,16 +395,5 @@ async def list_deliveries(
                 **{state.value: counts[state] for state in DeliveryStatus}
             ),
         )
-    except Exception as exc:
-        _translate(exc)
-
-
-@router.post("/demo/reset", response_model=AdminResetResponse)
-async def reset_demo(
-    staff: AuthenticatedStaff = Depends(require_admin_role),
-    service: AdminApplicationService = Depends(get_admin_application_service),
-):
-    try:
-        return AdminResetResponse(reset=(await service.reset(staff.service_id)).reset)
     except Exception as exc:
         _translate(exc)

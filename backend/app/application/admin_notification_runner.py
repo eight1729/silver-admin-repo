@@ -28,17 +28,17 @@ class AdminNotificationRunner:
                 operations = await self._repository.list_recovery_operations(
                     service_id, after=self._cursors.get(service_id), limit=50)
             except Exception as error:
-                logger.warning("Admin recovery selection failed: %s", type(error).__name__)
+                logger.warning("component=admin_notification stage=recovery event=failed reason_category=recovery_selection")
                 continue
             self._cursors[service_id] = operations[-1].operation_id if operations else None
             for operation in operations:
                 if operation.status is not OperationStatus.CANCELLED:
-                    for action in (self._dispatcher.dispatch_operation, self._reconciler.reconcile_operation):
+                    for stage, action in (("dispatch", self._dispatcher.dispatch_operation), ("reconcile", self._reconciler.reconcile_operation)):
                         try:
                             await action(service_id=service_id, operation_id=operation.operation_id)
                         except Exception as error:
                             # Submission failure must not block existing result polling.
-                            logger.warning("Admin notification operation failed: %s", type(error).__name__)
+                            logger.warning("component=admin_notification stage=%s event=failed reason_category=runner_action operation_id=%s", stage, operation.operation_id)
 
     async def start(self) -> None:
         if self._task is not None:
@@ -64,7 +64,7 @@ class AdminNotificationRunner:
                 raise
             except Exception as error:
                 # A single cycle failure must not permanently stop later work.
-                logger.warning("Admin notification cycle failed: %s", type(error).__name__)
+                logger.warning("component=admin_notification stage=recovery event=failed reason_category=runner_cycle")
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._interval)
             except asyncio.TimeoutError:

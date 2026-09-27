@@ -13,7 +13,6 @@ from app.application.notification_service import (
     NotificationTargetInput,
     OperationNotSendableError,
     ReplaceNotificationTargetsCommand,
-    ResetDemoDataResult,
     SendNotificationOperationCommand,
     UpdateNotificationDraftCommand,
     ValidateNotificationOperationCommand,
@@ -35,6 +34,7 @@ from app.domain.models.external_business import (
     JobSearchQuery,
 )
 from app.domain.ports.external_business import ExternalBusinessGateway
+from app.adapter.line_internal_api import LineInternalApiClientError
 from app.domain.ports.organization_service_scope import (
     OrganizationServiceScopeResolver,
     OrganizationServiceScopeNotConfiguredError,
@@ -42,6 +42,7 @@ from app.domain.ports.organization_service_scope import (
 from app.contracts.admin_line_internal_v1 import (
     LiffDeepLinkRequest,
     LinkageStatusBatchRequest,
+    LinkageStatusBatchResponse,
     ServiceOrganizationScope,
 )
 
@@ -94,19 +95,16 @@ class AdminApplicationService:
         external_business_gateway: ExternalBusinessGateway,
         demo_service_id: str | None,
         line_linked_member_ids: frozenset[str],
-        reset_callbacks: tuple[Callable[[], None], ...] = (),
         expose_line_subjects: bool = True,
         line_internal_client=None,
         organization_id_resolver: Callable[[str], str] | None = None,
         external_business_organization_id_resolver: Callable[[str], str] | None = None,
         scope_resolver: OrganizationServiceScopeResolver | None = None,
-        legacy_notification_link_resolver: Callable[[str], str] | None = None,
     ) -> None:
         self.notification_service = notification_service
         self._external = external_business_gateway
         self._demo_service_id = demo_service_id
         self._line_linked = line_linked_member_ids
-        self._reset_callbacks = reset_callbacks
         self._expose_line_subjects = expose_line_subjects
         self._line_internal_client = line_internal_client
         self._organization_id_resolver = organization_id_resolver
@@ -115,7 +113,6 @@ class AdminApplicationService:
             or organization_id_resolver
         )
         self._scope_resolver = scope_resolver
-        self._legacy_notification_link_resolver = legacy_notification_link_resolver
 
     def _check_service(self, service_id: str) -> None:
         if self._scope_resolver is not None:
@@ -174,22 +171,35 @@ class AdminApplicationService:
         linkage = None
         if self._line_internal_client is not None:
             scope = self._line_scope(service_id)
-            response = await self._line_internal_client.batch_get_linkages(
-                LinkageStatusBatchRequest(
-                    scope=scope,
-                    external_member_ids=tuple(
-                        item.external_member_id for item in candidates
-                    ),
-                )
+            linkage = await self._lookup_linkages(
+                scope, (item.external_member_id for item in candidates)
             )
-            linkage = {item.external_member_id: item.line_linked for item in response.items}
         return tuple(
             self._candidate(
                 item,
-                None if linkage is None else linkage.get(item.external_member_id, False),
+                None if linkage is None else linkage[item.external_member_id],
             )
             for item in candidates
         )
+
+    async def _lookup_linkages(self, scope, member_ids):
+        ids = tuple(dict.fromkeys(member_ids))
+        lookup = {}
+        try:
+            for offset in range(0, len(ids), 500):
+                chunk = ids[offset:offset + 500]
+                response = LinkageStatusBatchResponse.model_validate(
+                    await self._line_internal_client.batch_get_linkages(
+                        LinkageStatusBatchRequest(scope=scope, external_member_ids=chunk)
+                    )
+                )
+                returned = tuple(item.external_member_id for item in response.items)
+                if len(returned) != len(chunk) or set(returned) != set(chunk):
+                    raise ValueError("linkage response identity mismatch")
+                lookup.update((item.external_member_id, item.line_linked) for item in response.items)
+        except (LineInternalApiClientError, ValueError):
+            raise AdminDependencyUnavailableError("LINE linkage lookup unavailable") from None
+        return lookup
 
     def _candidate(self, item: CandidateMember, line_linked: bool | None = None) -> AdminCandidate:
         return AdminCandidate(
@@ -225,8 +235,6 @@ class AdminApplicationService:
                 LiffDeepLinkRequest(scope=self._line_scope(service_id), job_id=job_id)
             )
             return str(result.canonical_deep_link)
-        if self._legacy_notification_link_resolver is not None:
-            return self._legacy_notification_link_resolver(job_id)
         raise AdminDependencyUnavailableError("LINE deep-link service is unavailable")
 
     async def create_operation(
@@ -349,10 +357,3 @@ class AdminApplicationService:
     async def list_deliveries(self, service_id: str, operation_id: UUID):
         await self.notification_service.get_operation(service_id, operation_id)
         return await self.notification_service.list_deliveries(service_id, operation_id)
-
-    async def reset(self, service_id: str) -> ResetDemoDataResult:
-        self._check_service(service_id)
-        result = await self.notification_service.reset_demo_data()
-        for callback in self._reset_callbacks:
-            callback()
-        return result

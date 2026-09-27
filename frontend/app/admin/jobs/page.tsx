@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { adminApi, adminErrorMessage, type AdminJobSummary } from "../../lib/admin-api";
 import { AdminRouteFrame } from "../AdminRouteFrame";
+import { jobStatusLabel } from "../job-status";
 
 export default function AdminJobsPage() {
   const [jobs, setJobs] = useState<AdminJobSummary[]>([]);
@@ -25,6 +26,3 @@ export default function AdminJobsPage() {
   </AdminRouteFrame>;
 }
 
-function jobStatusLabel(status: AdminJobSummary["status"]) {
-  return ({ published: "募集中", closed: "募集終了", draft: "下書き", suspended: "停止中" } as const)[status];
-}

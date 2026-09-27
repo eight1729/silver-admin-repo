@@ -3,7 +3,6 @@ import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import timedelta
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -18,7 +17,7 @@ from app.db.admin_tables import admin_notification_outbox as outbox_table
 from app.domain.models.admin_notification import NotificationOperationRecord, NotificationAuditEvent
 from app.domain.enums.notification_type import NotificationType
 from app.domain.errors.admin_notification_repository import RepositoryStateError
-from test_admin_line_dispatch import NOW, _outbox, Client, Repo, DeliveryStatus, OperationStatus, NotificationOutboxState
+from test_admin_line_dispatch import NOW, _outbox, _result, Client, Repo, DeliveryStatus, OperationStatus, NotificationOutboxState
 from app.adapter.line_internal_api import LineInternalApiPermanentError, LineInternalApiRetryableError
 
 
@@ -105,6 +104,7 @@ async def test_two_workers_one_active_submission(db):
             self.commands.append(command)
             started.set()
             await release.wait()
+            return _result(command)
     client = Blocking([])
     worker = AdminLineOutboxDispatcher(repository=repo, line_client=client)
     first = asyncio.create_task(worker.dispatch_operation(service_id="svc", operation_id=op.operation_id))
@@ -141,7 +141,7 @@ async def test_terminal_atomic_idempotent_and_no_poll(db, status, expected):
         calls = 0
         async def get_notification_result(self, command_id):
             self.calls += 1
-            return SimpleNamespace(status=status, reason_code="reason", updated_at=NOW)
+            return _result(items[0], status=status, reason_code="reason", updated_at=NOW)
     client = Results()
     reconciler = AdminLineResultReconciler(repository=repo, line_client=client)
     await reconciler.reconcile_operation(service_id="svc", operation_id=op.operation_id)
@@ -168,8 +168,10 @@ async def test_mixed_and_empty_aggregate(db):
     await dispatch(repo, op, [LineInternalApiPermanentError("bad")])
     assert (await repo.get_operation("svc", op.operation_id)).status is OperationStatus.SENDING
     await dispatch(repo, op, [None])
+    accepted = next(item for item in await repo.get_outbox_records("svc", op.operation_id)
+                    if item.state is NotificationOutboxState.ACCEPTED)
     reconciler = AdminLineResultReconciler(repository=repo, line_client=Client([
-        SimpleNamespace(status="sent", reason_code=None, updated_at=NOW)]))
+        _result(accepted, status="sent", reason_code=None, updated_at=NOW)]))
     result = await reconciler.reconcile_operation(service_id="svc", operation_id=op.operation_id)
     assert result.status is OperationStatus.COMPLETED_WITH_ERRORS
     repo, now, op, items = await seed(db, count=0, reserved=False)
@@ -205,7 +207,7 @@ async def test_runner_recovers_crash_and_completes_without_frontend(db):
     repo, now, op, items = await seed(db)
     await repo.claim_outbox_records("svc", op.operation_id)
     now[0] += timedelta(seconds=61)
-    client = Client([None, SimpleNamespace(status="sent", reason_code=None, updated_at=NOW)])
+    client = Client([None, _result(items[0], status="sent", reason_code=None, updated_at=NOW)])
     runner = AdminNotificationRunner(repository=repo, service_ids=["svc"],
         dispatcher=AdminLineOutboxDispatcher(repository=repo, line_client=client),
         reconciler=AdminLineResultReconciler(repository=repo, line_client=client), interval_seconds=0.01)
@@ -291,7 +293,8 @@ async def test_runner_pages_and_failure_isolation_and_private_logs(db, caplog):
     await runner.run_cycle()
     assert len(calls) == 2
     assert len(reconciled) == 2
-    assert "RuntimeError" in caplog.text and "private message" not in caplog.text
+    assert "reason_category=runner_action" in caplog.text and "private message" not in caplog.text
+    assert "operation_id=" in caplog.text and "stage=dispatch" in caplog.text
     # SQL selection is bounded and keyset pagination does not revisit the first page.
     for _ in range(3): await seed(db)
     first = await repo.list_recovery_operations("svc", limit=2)

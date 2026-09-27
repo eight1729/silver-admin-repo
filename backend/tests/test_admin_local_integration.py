@@ -72,9 +72,9 @@ def test_default_local_keeps_compatibility_dependency():
 
 
 @pytest.mark.asyncio
-async def test_default_local_keeps_fake_send_mode(monkeypatch):
+async def test_default_local_keeps_unavailable_send_mode(monkeypatch):
     expected = {
-        "mode": "fake", "max_recipients": None, "message_prefix": None,
+        "mode": "unavailable", "max_recipients": None, "message_prefix": None,
         "live_send_enabled": False, "ready": False, "blocking_reasons": (),
     }
     monkeypatch.setattr(
@@ -155,7 +155,7 @@ def test_local_integration_uses_phase4_persistent_http_composition():
     assert isinstance(composition.boundary.dispatcher, AdminLineOutboxDispatcher)
     assert isinstance(composition.boundary.reconciler, AdminLineResultReconciler)
     assert composition.application.notification_service._repository is composition.boundary.repository
-    assert composition.application.notification_service._line_sender is None
+    assert not hasattr(composition.application.notification_service, "_line_sender")
     assert queue._handler is composition.dispatch
 
 
@@ -171,7 +171,7 @@ def test_default_local_integration_builds_current_db_without_fake():
     )
     assert isinstance(composition.external_business, CurrentDbExternalBusinessGateway)
     assert isinstance(composition.queue, LocalInlineNotificationQueue)
-    assert composition.application.notification_service._line_sender is None
+    assert not hasattr(composition.application.notification_service, "_line_sender")
     assert not hasattr(composition.boundary, "line_sender")
 
 

@@ -21,20 +21,10 @@ from app.domain.enums.notification_type import NotificationType
 from app.domain.errors.errors import (
     ExternalJobNotFoundError,
     ExternalSystemUnavailableError,
-    LineAuthenticationError,
-    LineBadRequestError,
-    LineConfigurationError,
-    LineRateLimitError,
-    LineRecipientUnavailableError,
-    LineSendError,
-    LineTemporaryError,
-    LineUnknownResultError,
     QueueError,
 )
-from app.domain.models.messaging import JobNotificationMessage
 from app.domain.models.notification import NotificationValidationResult
 from app.domain.ports.external_business import ExternalBusinessGateway
-from app.domain.ports import LineMessageGateway
 from app.domain.ports.queue import QueueGateway
 from app.domain.errors.admin_notification_repository import (
     SendAttemptAlreadyExistsError,
@@ -172,15 +162,6 @@ class SendNotificationOperationCommand:
     request_id: str
 
 
-@dataclass(frozen=True, slots=True)
-class ProcessNotificationOperationCommand:
-    """Command issued by the queue handler to process pending deliveries."""
-
-    service_id: str
-    operation_id: UUID
-    request_id: str
-
-
 # ── Result types ──────────────────────────────────────────────────────────────
 
 
@@ -188,11 +169,6 @@ class ProcessNotificationOperationCommand:
 class NotificationOperationResult:
     operation: NotificationOperationRecord
     targets: tuple[NotificationTargetRecord, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ResetDemoDataResult:
-    reset: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,36 +268,6 @@ def _validation_snapshot(summary: NotificationValidationSummary) -> dict:
     }
 
 
-def _map_line_exception(exc: LineSendError) -> tuple[DeliveryStatus, str, str]:
-    """Map a LineSendError subclass to (delivery_status, error_code, sanitised_message).
-
-    The returned error_message is a generic string; it never contains the raw
-    exception text, LINE response body, or any PII.
-    """
-    if isinstance(exc, (LineAuthenticationError, LineConfigurationError)):
-        return (
-            DeliveryStatus.FAILED,
-            "line_authentication_error",
-            "LINE authentication failed",
-        )
-    if isinstance(exc, LineRecipientUnavailableError):
-        return (
-            DeliveryStatus.FAILED,
-            "recipient_unavailable",
-            "LINE recipient unavailable",
-        )
-    if isinstance(exc, LineRateLimitError):
-        return DeliveryStatus.FAILED, "line_rate_limited", "LINE rate limit exceeded"
-    if isinstance(exc, LineTemporaryError):
-        return DeliveryStatus.FAILED, "line_temporary_error", "LINE temporary error"
-    if isinstance(exc, LineBadRequestError):
-        return DeliveryStatus.FAILED, "line_bad_request", "LINE bad request error"
-    if isinstance(exc, LineUnknownResultError):
-        return DeliveryStatus.UNKNOWN, "line_unknown_result", "LINE result unknown"
-    # Catch-all for any other LineSendError subclass
-    return DeliveryStatus.FAILED, "line_send_error", "LINE send error"
-
-
 # ── Service ───────────────────────────────────────────────────────────────────
 
 
@@ -333,7 +279,6 @@ class NotificationService:
         *,
         repository: AdminNotificationRepository,
         external_business_gateway: ExternalBusinessGateway | None = None,
-        line_sender: LineMessageGateway | None = None,
         queue_gateway: QueueGateway | None = None,
         clock: Callable[[], datetime] | None = None,
         uuid_factory: Callable[[], UUID] | None = None,
@@ -341,10 +286,6 @@ class NotificationService:
             Callable[[NotificationOperationResult, NotificationValidationSummary], None]
             | None
         ) = None,
-        message_factory: (
-            Callable[[NotificationOperationRecord], JobNotificationMessage] | None
-        ) = None,
-        line_subject_resolver: Callable[[str, str], str] | None = None,
         organization_id_resolver: Callable[[str], str] | None = None,
         external_business_organization_id_resolver: Callable[[str], str] | None = None,
         require_scoped_queue: bool = False,
@@ -353,13 +294,10 @@ class NotificationService:
     ) -> None:
         self._repository = repository
         self._external_business_gateway = external_business_gateway
-        self._line_sender = line_sender
         self._queue_gateway = queue_gateway
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._uuid_factory = uuid_factory or uuid4
         self._pre_send_guard = pre_send_guard
-        self._message_factory = message_factory
-        self._line_subject_resolver = line_subject_resolver
         self._organization_id_resolver = organization_id_resolver
         self._external_business_organization_id_resolver = (
             external_business_organization_id_resolver
@@ -933,8 +871,8 @@ class NotificationService:
            deliveries for SKIP-disposition targets.
         6. Persist deliveries and set send_requested_at on the operation.
         7. Audit send_requested.
-        8. Enqueue the operation. In inline mode the queue handler immediately
-           calls process_operation. If enqueue fails, durable intent remains
+        8. Enqueue the operation for the configured dispatcher.
+           If enqueue fails, durable intent remains
            accepted and the operation is left READY (not SENDING).
         """
         _required(command.service_id, "service_id")
@@ -1139,7 +1077,18 @@ class NotificationService:
         # Reserve the send atomically. The persistent adapter repeats the
         # duplicate check while holding the operation row lock.
         if self._reservation_guard is not None:
-            await self._reservation_guard(command.service_id, sendable_count)
+            try:
+                await self._reservation_guard(command.service_id, sendable_count)
+            except OperationNotSendableError as error:
+                reason = getattr(error, "reason_category", None)
+                if not isinstance(reason, str) or reason not in {"line_capability_unavailable", "line_send_not_ready", "line_recipient_limit_exceeded"}:
+                    reason = "capability_rejected"
+                mode = getattr(error, "capability_mode", None)
+                if not isinstance(mode, str) or mode not in {"disabled", "staging_live", "production_live"}:
+                    mode = "unavailable"
+                _logger.warning("component=admin_notification stage=capability event=rejected operation_id=%s reason_category=%s capability_mode=%s",
+                    command.operation_id, reason, mode)
+                raise
         try:
             updated, _stored_deliveries = await self._repository.begin_send_attempt(
                 command.service_id,
@@ -1215,216 +1164,13 @@ class NotificationService:
                 # This audit is auxiliary and occurs after the send-intent
                 # transaction committed. Its failure cannot undo acceptance.
                 _logger.error(
-                    "enqueue_failed audit append failed (%s)",
-                    type(audit_error).__name__,
+                    "component=admin_notification stage=audit event=failed reason_category=audit_append_failed operation_id=%s",
+                    command.operation_id,
                 )
             return restored
 
         # Return current state (COMPLETED/COMPLETED_WITH_ERRORS if inline processed)
         return await self._repository.get_operation(command.service_id, command.operation_id)
-
-    # ── Process ───────────────────────────────────────────────────────────────
-
-    async def process_operation(
-        self, command: ProcessNotificationOperationCommand
-    ) -> NotificationOperationRecord:
-        """Process pending deliveries for an operation.
-
-        Processing order:
-        1. Load operation and current deliveries.
-        2. Set operation status to SENDING.
-        3. Filter to PENDING deliveries only (sent/failed/unknown/skipped are not
-           re-processed — this makes the method idempotent on re-entry).
-        4. For each PENDING delivery call LineMessageGateway.send_job_notification.
-        5. On success: status → SENT, provider line_request_id and sent_at saved.
-        6. On LineSendError: map to FAILED or UNKNOWN with sanitised error_code.
-        7. On unexpected error: mark UNKNOWN.
-        8. Continue processing remaining deliveries even after a single failure.
-        9. After all pending deliveries are processed, aggregate counts and set
-           operation status to COMPLETED or COMPLETED_WITH_ERRORS.
-        10. Set completed_at and audit processing_completed.
-        """
-        # 1. Load operation and deliveries
-        operation = await self._repository.get_operation(
-            command.service_id, command.operation_id
-        )
-        deliveries = await self._repository.get_deliveries(
-            command.service_id, command.operation_id
-        )
-
-        # A completed/replayed operation has no pending work.  Return before
-        # changing status or emitting duplicate processing audit events.
-        pending = [d for d in deliveries if d.status is DeliveryStatus.PENDING]
-        if not pending:
-            return operation
-
-        if operation.status not in (OperationStatus.READY, OperationStatus.SENDING):
-            raise OperationNotSendableError(
-                f"operation cannot be processed in status '{operation.status.value}'"
-            )
-
-        # 2. Set SENDING
-        sending = replace(operation, status=OperationStatus.SENDING)
-        now = self._now()
-        operation = await self._repository.update_operation_with_audit(
-            command.service_id,
-            command.operation_id,
-            sending,
-            self._audit_event(
-                sending,
-                "processing_started",
-                None,
-                {"pending_count": len(pending)},
-                now,
-            ),
-        )
-
-        if self._line_sender is None:
-            raise InvalidNotificationCommandError(
-                "line messaging gateway is required for process_operation"
-            )
-
-        # 5. Build JobNotificationMessage from operation fields.
-        # The notification body is taken from operation.message.
-        # Fixed items (center_name, job_detail_url) are derived from fields
-        # available without additional external calls, keeping the Application
-        # Service free of raw LINE payloads and external JSON.
-        job_message = (
-            self._message_factory(operation)
-            if self._message_factory
-            else JobNotificationMessage(
-                message_body=(
-                    f"{operation.message.greeting}\n\n"
-                    f"{operation.message.introduction}\n\n"
-                    f"{operation.message.note}"
-                ),
-                job_detail_url=f"https://demo.local/jobs/{operation.job_id}",
-                center_name=operation.service_id,
-                inquiry_text=None,
-            )
-        )
-
-        sent_this_round = 0
-        failed_this_round = 0
-        unknown_this_round = 0
-
-        # 4, 6-8, 13. Process each PENDING delivery; continue on individual failure
-        for delivery in pending:
-            try:
-                line_subject = delivery.line_subject
-                if line_subject is None and self._line_subject_resolver is not None:
-                    line_subject = self._line_subject_resolver(
-                        command.service_id, delivery.member_id
-                    )
-                if not line_subject:
-                    raise InvalidNotificationCommandError(
-                        "LINE destination is unavailable"
-                    )
-                result = await self._line_sender.send_job_notification(
-                    service_id=command.service_id,
-                    line_subject=line_subject,
-                    message=job_message,
-                    request_id=delivery.request_id or command.request_id,
-                )
-                # 7-9. Success: save provider request ID and sent_at
-                updated_delivery = replace(
-                    delivery,
-                    status=DeliveryStatus.SENT,
-                    line_request_id=result.line_request_id,
-                    sent_at=result.accepted_at,
-                )
-                sent_this_round += 1
-            except LineSendError as exc:
-                # 10-11. Map known LINE exception to typed error code
-                status, error_code, error_message = _map_line_exception(exc)
-                updated_delivery = replace(
-                    delivery,
-                    status=status,
-                    error_code=error_code,
-                    error_message=error_message,
-                )
-                if status is DeliveryStatus.FAILED:
-                    failed_this_round += 1
-                else:
-                    unknown_this_round += 1
-            except Exception:
-                # 11. Unexpected error → UNKNOWN; do NOT store raw exception text
-                updated_delivery = replace(
-                    delivery,
-                    status=DeliveryStatus.UNKNOWN,
-                    error_code="unexpected_error",
-                    error_message="An unexpected error occurred during delivery",
-                )
-                unknown_this_round += 1
-
-            await self._repository.update_delivery(
-                command.service_id,
-                command.operation_id,
-                delivery.delivery_id,
-                updated_delivery,
-            )
-
-        # 14. Re-read all deliveries to get authoritative counts for status roll-up
-        now = self._now()
-        all_deliveries = await self._repository.get_deliveries(
-            command.service_id, command.operation_id
-        )
-        sent_count = sum(1 for d in all_deliveries if d.status is DeliveryStatus.SENT)
-        failed_count = sum(
-            1 for d in all_deliveries if d.status is DeliveryStatus.FAILED
-        )
-        unknown_count = sum(
-            1 for d in all_deliveries if d.status is DeliveryStatus.UNKNOWN
-        )
-        skipped_count = sum(
-            1 for d in all_deliveries if d.status is DeliveryStatus.SKIPPED
-        )
-
-        # Aggregate delivery_processed audit (one event, not per-delivery)
-        await self._audit(
-            operation,
-            "delivery_processed",
-            None,
-            {
-                "sent_count": sent_this_round,
-                "failed_count": failed_this_round,
-                "unknown_count": unknown_this_round,
-                "processed_count": len(pending),
-            },
-            now,
-        )
-
-        # 15-16. Determine final operation status
-        final_status = (
-            OperationStatus.COMPLETED_WITH_ERRORS
-            if failed_count > 0 or unknown_count > 0
-            else OperationStatus.COMPLETED
-        )
-
-        # 17. Set completed_at
-        completed_record = replace(
-            operation, status=final_status, completed_at=now
-        )
-        completed = await self._repository.update_operation_with_audit(
-            command.service_id,
-            command.operation_id,
-            completed_record,
-            self._audit_event(
-                completed_record,
-                "processing_completed",
-                None,
-                {
-                    "sent_count": sent_count,
-                    "failed_count": failed_count,
-                    "unknown_count": unknown_count,
-                    "skipped_count": skipped_count,
-                    "final_status": final_status.value,
-                },
-                now,
-            ),
-        )
-
-        return completed
 
     # ── Query / admin ─────────────────────────────────────────────────────────
 
@@ -1432,7 +1178,3 @@ class NotificationService:
         self, service_id: str, operation_id: UUID
     ) -> tuple[NotificationDeliveryRecord, ...]:
         return await self._repository.get_deliveries(service_id, operation_id)
-
-    async def reset_demo_data(self) -> ResetDemoDataResult:
-        await self._repository.reset()
-        return ResetDemoDataResult(reset=True)

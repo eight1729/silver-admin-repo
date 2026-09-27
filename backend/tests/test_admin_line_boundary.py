@@ -39,8 +39,8 @@ def test_production_admin_composition_has_only_internal_api_line_boundary():
         runtime_settings=configured,
     )
     notifications = application.notification_service
-    assert notifications._line_sender is None
-    assert notifications._line_subject_resolver is None
+    assert not hasattr(notifications, "_line_sender")
+    assert not hasattr(notifications, "_line_subject_resolver")
     assert notifications._persist_line_subjects is False
     assert application._line_internal_client is boundary.client
     assert queue.handler is dispatch

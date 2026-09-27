@@ -308,6 +308,18 @@
             ],
             "title": "Reason Code"
           },
+          "sent_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
           "status": {
             "$ref": "#/components/schemas/NotificationCommandStatus"
           },

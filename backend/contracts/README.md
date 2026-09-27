@@ -4,11 +4,10 @@
 contract artifact for the future Admin-to-LINE boundary. It can be distributed
 to consumers without granting access to the provider source repository.
 
-Regenerate it deterministically from the backend directory:
-
-```text
-python scripts/export_line_internal_openapi.py
-```
+This is a consumer copy. Regenerate it in the LINE repository using its
+`backend/scripts/export_line_internal_openapi.py`, then copy the versioned
+artifact here and run the Admin consumer compatibility tests. Do not generate
+LINE-owned artifacts from this repository.
 
 The full semantic contract version is declared by
 `LINE_INTERNAL_CONTRACT_VERSION`; the filename carries its major version.
@@ -20,12 +19,11 @@ the provider schema, which is enforced by the focused contract test.
 This artifact describes interfaces only. It is not a runtime API registration,
 durable command store, delivery implementation, or authentication mechanism.
 
-`line-api-v1.openapi.json` and `admin-api-v1.openapi.json` are the versioned
-public artifacts for the separated application entrypoints. Regenerate all
-owner artifacts deterministically with:
+`admin-api-v1.openapi.json` is the current Admin-owned public artifact.
+Regenerate it deterministically from the backend directory with:
 
 ```text
-python scripts/export_application_openapi.py all
+python scripts/export_application_openapi.py
 ```
 
 The Admin LINE-internal client consumes the distributable models in

@@ -38,6 +38,25 @@ function derive(overrides: Partial<Parameters<typeof deriveNotificationUiState>[
   return deriveNotificationUiState({ hasJob: true, selectedCount: 1, messageValid: true, operation: operation(), validation, validationCurrent: true, validationWasInvalidated: false, busy: false, action: "idle", liveBlocked: false, liveLinkReady: true, hasTerminalDelivery: false, queueFailure: false, ...overrides });
 }
 
+for (const count of [0, 1, 2, 3, 5]) {
+  test(`production validates and sends ${count} selected only when positive`, () => {
+    const result = derive({ selectedCount: count, maxRecipients: null,
+      validation: { ...validation, selected_count: count, sendable_count: count } });
+    assert.equal(result.canValidate, count > 0);
+    assert.equal(result.canSend, count > 0);
+  });
+}
+
+test("finite capability gates selection and send without weakening backend validation", () => {
+  const multiple = { ...validation, selected_count: 3, sendable_count: 3 };
+  assert.equal(derive({ selectedCount: 3, maxRecipients: 1, validation: multiple }).canValidate, false);
+  assert.equal(derive({ selectedCount: 3, maxRecipients: 2, validation: multiple }).canSend, false);
+  assert.equal(derive({ selectedCount: 3, maxRecipients: null, validation: { ...multiple, can_proceed: false } }).canSend, false);
+  assert.equal(derive({ selectedCount: 3, maxRecipients: null, validation: { ...multiple, sendable_count: 0 } }).canSend, false);
+  assert.equal(derive({ selectedCount: 3, maxRecipients: null, validation: { ...multiple, sendable_count: 2, skipped_count: 1 } }).canSend, true);
+  assert.equal(derive({ selectedCount: 3, maxRecipients: null, validation: multiple, liveBlocked: true }).canSend, false);
+});
+
 test("central button policy covers initial, editing, validatable, validated and stale", () => {
   assert.equal(derive({ hasJob: false, selectedCount: 0, messageValid: false, operation: null, validation: null, validationCurrent: false }).state, "initial");
   assert.equal(derive({ selectedCount: 0, operation: operation("draft"), validation: null, validationCurrent: false }).state, "editing");
@@ -110,9 +129,10 @@ test("history starts a new frontend context without reset or unlink APIs", async
   assert.doesNotMatch(history, /adminApi\.reset|unlink/);
 });
 
-test("candidate selection handler keeps a single member and preserves validation invalidation", async () => {
+test("candidate selection handler uses capability toggle and preserves validation invalidation", async () => {
   const page = await readFile(new URL("./page.tsx", import.meta.url), "utf8");
-  assert.match(page, /selected\.has\(memberId\) \? new Set<string>\(\) : new Set\(\[memberId\]\)/);
+  assert.match(page, /toggleCandidateSelection\(selected, memberId, lineSendMode\?\.max_recipients \?\? null\)/);
+  assert.match(page, /maxRecipients: lineSendMode\?\.max_recipients \?\? null/);
   assert.match(page, /setValidationSnapshot\(null\)/);
   assert.match(page, /setValidationInvalidation/);
 });

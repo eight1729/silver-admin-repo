@@ -1,6 +1,7 @@
 """SQLAlchemy Core persistent adapter for Admin-owned notification data."""
 
 from dataclasses import replace
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Iterable, Mapping
 from uuid import UUID, uuid4
@@ -698,7 +699,13 @@ class SqlAlchemyAdminNotificationRepository:
             await conn.execute(update(admin_notification_outbox).where(
                 admin_notification_outbox.c.outbox_id == str(outbox_id)
             ).values(state=NotificationOutboxState.RECONCILED.value, lease_expires_at=None, claim_token=None))
-            return await self._aggregate(conn, operation)
+            reconciled = await self._aggregate(conn, operation)
+            resulting_status = delivery.status.value if current["status"] == DeliveryStatus.PENDING.value else current["status"]
+        # Only after commit, and only the worker that performed the transition.
+        logging.getLogger(__name__).info(
+            "component=admin_notification stage=reconcile event=terminal reason_category=reconcile_terminal command_id=%s operation_id=%s target_id=%s status=%s",
+            row["command_id"], operation_id, row["target_id"], resulting_status)
+        return reconciled
 
     async def list_recovery_operations(self, service_id, *, after=None, limit=50):
         op = admin_notification_operations.c
@@ -773,12 +780,3 @@ class SqlAlchemyAdminNotificationRepository:
             audit_id=UUID(row["audit_id"]), operation_id=UUID(row["operation_id"]),
             event_type=row["event_type"], staff_id=row["staff_id"], details=row["details"], created_at=_loaded_utc(row["created_at"]),
         ) for row in rows)
-
-    async def reset(self) -> None:
-        """Test/demo convenience; not part of the production repository port."""
-        async with self._engine.begin() as conn:
-            await conn.execute(delete(admin_notification_outbox))
-            await conn.execute(delete(admin_notification_audit_events))
-            await conn.execute(delete(admin_notification_deliveries))
-            await conn.execute(delete(admin_notification_targets))
-            await conn.execute(delete(admin_notification_operations))

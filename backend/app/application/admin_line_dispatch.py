@@ -8,6 +8,8 @@ from uuid import UUID
 from app.adapter.line_internal_api import (
     LineInternalApiPermanentError,
     LineInternalApiRetryableError,
+    LineNotificationResultNotFoundError,
+    validate_notification_result_identity,
 )
 from app.domain.enums.enums import DeliveryStatus
 from app.domain.models.admin_notification import NotificationOutboxState
@@ -18,6 +20,23 @@ from app.contracts.admin_line_internal_v1 import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _failure(item, stage, error):
+    # Never render exception text/causes, remote bodies, or member identifiers.
+    category = getattr(error, "reason_category", "unavailable")
+    if isinstance(error, LineNotificationResultNotFoundError):
+        category = "not_found"
+    elif isinstance(error, asyncio.TimeoutError):
+        category = "timeout"
+    if not isinstance(category, str) or category not in {"not_found", "timeout", "connection", "http", "contract", "identity_mismatch", "unavailable"}:
+        category = "unavailable"
+    reason = "response_identity_mismatch" if category == "identity_mismatch" else f"{stage}_{category}"
+    status = getattr(error, "http_status", None)
+    status = status if type(status) is int and 100 <= status <= 599 else None
+    logger.log(logging.ERROR if category in {"contract", "identity_mismatch"} else logging.WARNING,
+        "component=admin_notification stage=%s event=failed reason_category=%s command_id=%s operation_id=%s target_id=%s http_status=%s",
+        stage, reason, item.command_id, item.operation_id, item.target_id, status)
 
 
 class AdminLineOutboxDispatcher:
@@ -31,15 +50,20 @@ class AdminLineOutboxDispatcher:
         )
         for item in claimed:
             try:
-                await asyncio.wait_for(self._line_client.submit_notification_command(
+                result = await asyncio.wait_for(self._line_client.submit_notification_command(
                     self._command(item)
                 ), timeout=30)
-            except (LineInternalApiRetryableError, asyncio.TimeoutError):
+                validate_notification_result_identity(result, item)
+            except (LineInternalApiRetryableError, asyncio.TimeoutError) as error:
+                _failure(item, "dispatch", error)
                 state = NotificationOutboxState.RETRYABLE_FAILURE
-            except LineInternalApiPermanentError:
+            except LineInternalApiPermanentError as error:
+                _failure(item, "dispatch", error)
                 state = NotificationOutboxState.PERMANENT_FAILURE
             else:
                 state = NotificationOutboxState.ACCEPTED
+                logger.info("component=admin_notification stage=dispatch event=accepted command_id=%s operation_id=%s target_id=%s",
+                    item.command_id, item.operation_id, item.target_id)
             await self._repository.update_outbox_state(
                 service_id, operation_id, item.outbox_id, state, claim_token=item.claim_token
             )
@@ -98,8 +122,23 @@ class AdminLineResultReconciler:
         for item in page:
             try:
                 result = await asyncio.wait_for(self._line_client.get_notification_result(item.command_id), timeout=30)
+                validate_notification_result_identity(result, item)
             except Exception as error:
-                logger.warning("Admin result polling failed: %s", type(error).__name__)
+                _failure(item, "result_poll", error)
+                if isinstance(error, LineNotificationResultNotFoundError):
+                    # accepted means LINE committed the command. Missing provider
+                    # delivery returns accepted/pending, not 404. Converge this
+                    # permanent lookup failure without inventing a provider result
+                    # or replaying the command. The repository fences concurrent
+                    # terminal deliveries and aggregates in the same transaction.
+                    delivery = by_member.get(item.external_member_id)
+                    if delivery is not None:
+                        failed = replace(
+                            delivery, status=DeliveryStatus.FAILED,
+                            error_code="line_result_not_found", error_message=None,
+                        ) if delivery.status is DeliveryStatus.PENDING else delivery
+                        await self._repository.reconcile_outbox_result(
+                            service_id, operation_id, item.outbox_id, failed)
                 continue
             delivery = by_member.get(item.external_member_id)
             if delivery is None:
@@ -123,7 +162,7 @@ class AdminLineResultReconciler:
         if status == "sent":
             return replace(
                 delivery, status=DeliveryStatus.SENT, error_code=None,
-                error_message=None, sent_at=result.updated_at,
+                error_message=None, sent_at=result.sent_at,
             )
         if status == "failed":
             return replace(

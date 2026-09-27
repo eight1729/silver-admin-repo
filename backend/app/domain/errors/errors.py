@@ -30,38 +30,6 @@ class LineIdTokenInvalidError(LineAuthError):
     pass
 
 
-class LineSendError(DomainError):
-    pass
-
-
-class LineConfigurationError(LineSendError):
-    """Local LINE sender configuration is missing or invalid."""
-
-
-class LineAuthenticationError(LineSendError):
-    pass
-
-
-class LineRecipientUnavailableError(LineSendError):
-    pass
-
-
-class LineRateLimitError(LineSendError):
-    pass
-
-
-class LineTemporaryError(LineSendError):
-    pass
-
-
-class LineBadRequestError(LineSendError):
-    pass
-
-
-class LineUnknownResultError(LineSendError):
-    pass
-
-
 class QueueError(DomainError):
     pass
 

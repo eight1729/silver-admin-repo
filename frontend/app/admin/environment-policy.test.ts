@@ -3,10 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
-  allowsDemoReset,
-  allowsLiffTokenCheck,
   isStagingEnvironment,
-  legacyLiffRouteAction,
 } from "../lib/environment-policy.ts";
 import {
   blockingReasonMessages,
@@ -14,82 +11,28 @@ import {
   getBlockingReasonMessage,
 } from "./blocking-reasons.ts";
 
-test("token check is fail-closed outside local development environments", () => {
-  assert.deepEqual(
-    ["local", "development", "demo", "staging", "production", "unknown", undefined].map(
-      (environment) => allowsLiffTokenCheck(environment),
-    ),
-    [true, true, false, false, false, false, false],
-  );
-  assert.equal(allowsLiffTokenCheck(" Development "), true);
-});
-
-test("demo-capable environments enable reset and staging receives its own presentation", () => {
-  assert.deepEqual(
-    ["local", "development", "demo", "staging", "production", "unknown", undefined].map(
-      (environment) => allowsDemoReset(environment),
-    ),
-    [true, true, true, false, false, false, false],
-  );
+test("staging environment detection normalizes the value", () => {
   assert.equal(isStagingEnvironment(" staging "), true);
   assert.equal(isStagingEnvironment("demo"), false);
 });
 
-test("middleware is limited to token check and APP_ENV stays server-side", async () => {
-  const middleware = await readFile(new URL("../../middleware.ts", import.meta.url), "utf8");
-  const nextConfig = await readFile(new URL("../../next.config.js", import.meta.url), "utf8");
-  assert.match(middleware, /"\/liff-token-check"/);
-  assert.match(middleware, /"\/demo\/liff\/:path\*"/);
-  assert.match(middleware, /allowsLiffTokenCheck\(process\.env\.APP_ENV\)/);
-  assert.match(middleware, /status:\s*404/);
-  assert.doesNotMatch(middleware, /console\./);
-  assert.match(middleware, /new NextResponse\(null, \{ status: 404 \}\)/);
-  assert.match(nextConfig, /"APP_ENV"/);
-  assert.doesNotMatch(nextConfig, /NEXT_PUBLIC_APP_ENV/);
-});
-
-test("legacy LIFF routes redirect only in staging and fail closed in production", () => {
-  assert.deepEqual(
-    ["local", "development", "demo", "staging", "production", "unknown", undefined].map(
-      (environment) => legacyLiffRouteAction(environment),
-    ),
-    ["next", "next", "next", "redirect", "not_found", "not_found", "not_found"],
-  );
-});
-
-test("legacy LIFF redirect preserves path identifiers and query through URL cloning", async () => {
-  const middleware = await readFile(new URL("../../middleware.ts", import.meta.url), "utf8");
-  assert.match(middleware, /request\.nextUrl\.clone\(\)/);
-  assert.match(middleware, /replace\(\s*\/\^\\\/demo\\\/liff\//);
-  assert.match(middleware, /NextResponse\.redirect\(destination, 307\)/);
-});
-
-test("staging omits the reset control and uses verification copy", async () => {
-  const page = await readFile(new URL("./page.tsx", import.meta.url), "utf8");
+test("staging uses verification copy", async () => {
   const layout = await readFile(new URL("./layout.tsx", import.meta.url), "utf8");
-  assert.match(page, /allowDemoReset\s*&&\s*<div/);
-  assert.match(page, />デモデータをリセット<\/button>/);
   assert.match(layout, /準本番検証環境/);
   assert.match(layout, /現在のLINE送信モードと送信可否を画面内で確認/);
   assert.match(layout, /送信時にはBackendでも再検証/);
   assert.doesNotMatch(layout, /業務データはモックです|現在は実LINE通知を送信しません|Backend再起動で一時データが初期化されます/);
-  assert.match(layout, /LOCAL DEMO/);
+  assert.doesNotMatch(layout, /admin-legacy-header|STAGING VERIFICATION|LOCAL DEMO/);
   assert.match(layout, /ローカルデモ環境/);
 });
 
-test("Admin and LIFF clients use owner-specific API configuration", async () => {
-  const adminConfig = await readFile(new URL("../lib/admin-config.ts", import.meta.url), "utf8");
-  const lineConfig = await readFile(new URL("../lib/line-config.ts", import.meta.url), "utf8");
-  const admin = await readFile(new URL("../lib/admin-api.ts", import.meta.url), "utf8");
-  const liff = await readFile(new URL("../lib/liff-api.ts", import.meta.url), "utf8");
-  assert.match(adminConfig, /NEXT_PUBLIC_ADMIN_API_BASE_URL/);
-  assert.match(lineConfig, /NEXT_PUBLIC_LINE_API_BASE_URL/);
-  assert.match(admin, /import \{ ADMIN_API_BASE \}/);
-  assert.match(liff, /import \{ LINE_API_BASE \}/);
-  for (const source of [admin, liff]) {
-    assert.doesNotMatch(source, /https:\/\/[^"'`]+ngrok/);
-    assert.doesNotMatch(source, /https?:\/\/(localhost|127\.0\.0\.1)/);
-  }
+test("Admin client uses owner-specific API configuration", async () => {
+  const config = await readFile(new URL("../lib/admin-config.ts", import.meta.url), "utf8");
+  const client = await readFile(new URL("../lib/admin-api.ts", import.meta.url), "utf8");
+  assert.match(config, /NEXT_PUBLIC_ADMIN_API_BASE_URL/);
+  assert.match(client, /import \{ ADMIN_API_BASE \}/);
+  assert.doesNotMatch(client, /https?:\/\/(localhost|127\.0\.0\.1)/);
+  assert.doesNotMatch(client, /https:\/\/[^"'\x60]+ngrok/);
 });
 
 test("Admin exposes safe staging LINE mode and enforces one-recipient UI", async () => {
@@ -103,9 +46,9 @@ test("Admin exposes safe staging LINE mode and enforces one-recipient UI", async
   assert.match(page, /canAttemptSend\(lineSendMode/);
   assert.match(page, /deriveNotificationUiState/);
   assert.match(page, /canSend=\{workflowState\.canSend\}/);
-  assert.match(policy, /args\.selectedCount === 1/);
-  assert.match(policy, /args\.validation\.selected_count === 1/);
-  assert.match(policy, /args\.validation\.sendable_count === 1/);
+  assert.match(policy, /args\.selectedCount > 0/);
+  assert.match(policy, /args\.validation\.selected_count > 0/);
+  assert.match(policy, /args\.validation\.sendable_count > 0/);
   assert.match(policy, /args\.validationCurrent/);
   assert.match(policy, /!args\.liveBlocked/);
   assert.match(policy, /args\.liveLinkReady/);
@@ -167,9 +110,8 @@ test("blocked reason formatting deduplicates reasons and hides unknown codes", (
   assert.doesNotMatch(getBlockingReasonMessage(unknownCode), new RegExp(unknownCode));
 });
 
-test("blocked reasons are hidden for empty, fake, and live ready modes", () => {
+test("blocked reasons are hidden for empty and live ready modes", () => {
   assert.deepEqual(formatBlockingReasons({ mode: "staging_live", max_recipients: 1, message_prefix: null, ready: false, blocking_reasons: [] }), []);
-  assert.deepEqual(formatBlockingReasons({ mode: "fake", max_recipients: null, message_prefix: null, ready: false, blocking_reasons: ["allowlist_missing"] }), [blockingReasonMessages.allowlist_missing]);
   assert.deepEqual(formatBlockingReasons({ mode: "staging_live", max_recipients: 1, message_prefix: "configured", ready: true, blocking_reasons: ["allowlist_missing"] }), []);
 });
 

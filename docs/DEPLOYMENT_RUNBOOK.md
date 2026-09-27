@@ -131,7 +131,7 @@ DBのText型にはrole enumやUUIDの検証機能はない。既存値の型・�
   active=falseも同じ入力で指定可能で、既存Google accountを停止できない場合でもStaffアクセスを拒否する。
 - [ ] Canonical保存roleはviewer / sender / admin。旧DB値operatorはrepositoryでsenderへ互換変換するが、新CLIはoperatorを受け付けない。
   Viewerはread、senderは通常write / send、adminはそれらとadmin専用操作を許可。
-  Demo resetのBackend routeもadmin roleを要求する。Frontendの環境別表示制限をBackend認可と同一視しない。今回role / route / OIDCを変更しない。
+  Frontendの環境別表示制限をBackend認可と同一視しない。
 - [ ] X-Service-IDは要求serviceで、DB permissionを付与しない。指定時は一致するpermissionが必須。
   省略時はpermissionがちょうど1件の場合のみ採用し、0件・複数件は拒否する。
 - [ ] Workspace / personal Gmailとも登録済みissuer + sub、active、permissionで判定する。

@@ -83,6 +83,8 @@ async def test_transport_and_schema_failures_block_metadata_and_send(outcome):
     (capability("staging_live", True, 1), ("M001", "M002"), False, 0),
     (capability("staging_live", True, 1), ("M001", "M005"), True, 1),
     (capability("production_live"), ("M001", "M002"), True, 2),
+    (capability("production_live"), ("M001", "M002", "M003"), True, 3),
+    (capability("production_live"), ("M001", "M002", "M006"), False, 0),
     (capability("production_live", False), ("M001",), False, 0),
     (capability("staging_live", False, 1), ("M001",), False, 0),
     (capability("disabled", False), ("M001",), False, 0),
@@ -117,6 +119,36 @@ async def test_guard_before_atomic_reservation_counts_only_sendable(db, value, m
         await service.send_operation(command)
         assert await repo.get_deliveries("svc", op.operation_id) == before
         assert client.calls == 1
+        if pending == 3:
+            from app.application.admin_line_dispatch import AdminLineOutboxDispatcher, AdminLineResultReconciler
+            from app.domain.enums.enums import DeliveryStatus, OperationStatus
+            from test_admin_line_dispatch import Client as DispatchClient, _result
+            targets = await repo.get_targets("svc", op.operation_id)
+            assert sum(target.selected for target in targets) == 3
+            outbox = await repo.get_outbox_records("svc", op.operation_id)
+            assert len(before) == len(outbox) == 3
+            assert len({item.command_id for item in outbox}) == 3
+            assert len({item.target_id for item in outbox}) == 3
+            assert {item.external_member_id for item in outbox} == set(members)
+            dispatch_client = DispatchClient([])
+            dispatcher = AdminLineOutboxDispatcher(repository=repo, line_client=dispatch_client)
+            # Existing bounded claim processes one recipient per cycle.
+            for _ in range(3):
+                await dispatcher.dispatch_operation(service_id="svc", operation_id=op.operation_id)
+            assert len(dispatch_client.commands) == 3
+            statuses = ["sent", "pending", "pending"]
+            class Results:
+                async def get_notification_result(self, command_id):
+                    index = next(i for i, item in enumerate(outbox) if item.command_id == command_id)
+                    return _result(outbox[index], status=statuses[index], reason_code=None)
+            reconciler = AdminLineResultReconciler(repository=repo, line_client=Results())
+            mixed = await reconciler.reconcile_operation(service_id="svc", operation_id=op.operation_id)
+            assert mixed.status is OperationStatus.SENDING
+            assert sum(item.status is DeliveryStatus.PENDING for item in await repo.get_deliveries("svc", op.operation_id)) == 2
+            statuses[:] = ["sent", "failed", "sent"]
+            terminal = await reconciler.reconcile_operation(service_id="svc", operation_id=op.operation_id)
+            assert terminal.status is OperationStatus.COMPLETED_WITH_ERRORS
+            assert not any(item.status is DeliveryStatus.PENDING for item in await repo.get_deliveries("svc", op.operation_id))
     else:
         with pytest.raises(OperationNotSendableError): await service.send_operation(command)
         assert await repo.get_deliveries("svc", op.operation_id) == ()

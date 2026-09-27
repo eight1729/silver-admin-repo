@@ -1,6 +1,6 @@
 import { ADMIN_API_BASE } from "./admin-config";
 
-export type JobStatus = "draft" | "published" | "closed" | "suspended";
+export type JobStatus = "draft" | "published" | "paused" | "closed" | "cancelled" | "unknown";
 export type NotificationType = "new_job_match" | "existing_job_match" | "custom_job";
 export type OperationStatus = "draft" | "validating" | "ready" | "blocked_external_system" | "sending" | "completed" | "completed_with_errors" | "cancelled";
 export type DeliveryStatus = "pending" | "sent" | "failed" | "unknown" | "skipped";
@@ -13,7 +13,7 @@ export interface AdminOperation { operation_id: string; job_id: string; job_vers
 export interface AdminValidation { operation_id: string; status: OperationStatus; can_proceed: boolean; selected_count: number; sendable_count: number; skipped_count: number; reasons: string[]; version_changed: boolean; external_system_blocked: boolean }
 export interface AdminDelivery { delivery_id: string; member_id: string; status: DeliveryStatus; reason_code: string | null; created_at: string; sent_at: string | null; updated_at: string }
 export interface AdminDeliveries { items: AdminDelivery[]; summary: Record<DeliveryStatus, number> }
-export interface AdminLineSendMode { mode: "fake" | "disabled" | "staging_live" | "production_live" | "unavailable"; max_recipients: number | null; message_prefix: string | null; live_send_enabled?: boolean | null; ready?: boolean | null; blocking_reasons?: string[] }
+export interface AdminLineSendMode { mode: "disabled" | "staging_live" | "production_live" | "unavailable"; max_recipients: number | null; message_prefix: string | null; live_send_enabled?: boolean | null; ready?: boolean | null; blocking_reasons?: string[] }
 
 export class AdminApiError extends Error {
   constructor(public readonly status: number, public readonly code: string) { super(code); }
@@ -73,7 +73,6 @@ export const adminApi = {
   validate: (id: string) => request<AdminValidation>(`/admin/notification-operations/${encodeURIComponent(id)}/validate`, { method: "POST" }),
   send: (id: string) => request<AdminOperation>(`/admin/notification-operations/${encodeURIComponent(id)}/send`, { method: "POST" }),
   deliveries: (id: string, signal?: AbortSignal) => request<AdminDeliveries>(`/admin/notification-operations/${encodeURIComponent(id)}/deliveries`, {}, signal),
-  reset: () => request<{ reset: boolean }>("/admin/demo/reset", { method: "POST" }),
 };
 
 export function adminErrorMessage(error: unknown): string {

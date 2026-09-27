@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import type { AdminLineSendMode } from "../lib/admin-api";
 import { DEFAULT_CENTER_DISPLAY_NAME } from "./notification-templates";
 import { modePresentation } from "./send-capability";
+import { AdminHeaderActions } from "./AdminHeaderActions";
+import { AdminHomeButton } from "./AdminHomeButton";
 
 const navigationItems = [
   { label: "ダッシュボード", icon: "⌂", href: "/admin/dashboard" },
@@ -28,6 +30,10 @@ export function AdminShell({ mode, children }: { mode: AdminLineSendMode | null;
       <div className="admin-header-context" aria-label="現在の利用状況">
         <div className={`admin-mode admin-mode--${presentation.tone}`} role="status"><span className="admin-mode-mark" aria-hidden="true" /><span><strong>{presentation.label}</strong><small>{presentation.detail}</small></span></div>
         <div className="admin-safe-context"><span><small>操作担当</small><strong>準本番スタッフ</strong></span><span><small>所属</small><strong>{DEFAULT_CENTER_DISPLAY_NAME}</strong></span></div>
+      </div>
+      <div className="admin-header-actions">
+        {pathname === "/admin" && <AdminHomeButton />}
+        <AdminHeaderActions />
       </div>
     </header>
     <div className="admin-app-body">
