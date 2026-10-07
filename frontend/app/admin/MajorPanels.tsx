@@ -1,3 +1,4 @@
+import { orderCandidates } from "./candidate-order";
 import { canAttemptSend, isLiveMode, modePresentation, safetyPrefix, sendWarning } from "./send-capability";
 import { useEffect, useRef, useState } from "react";
 import type {
@@ -77,7 +78,7 @@ export function CandidateSelectionPanel({ job, candidates, selected, notificatio
   const [page, setPage] = useState(1);
   useEffect(() => { setFilter("all"); setPage(1); }, [job.job_id, setFilter]);
   useEffect(() => setPage(1), [filter]);
-  const visibleCandidates = filterCandidates(candidates, filter);
+  const visibleCandidates = filterCandidates(orderCandidates(candidates), filter);
   const totalPages = Math.max(1, Math.ceil(visibleCandidates.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageCandidates = visibleCandidates.slice((currentPage - 1) * pageSize, currentPage * pageSize);

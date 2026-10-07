@@ -1,0 +1,8 @@
+.admin-login{box-sizing:border-box;min-height:100vh;min-height:100svh;display:grid;place-items:center;padding:1.5rem;background:#f5f7f6;color:#1d2925}
+.admin-shell .admin-login{min-height:calc(100svh - 80px)}
+.admin-login-card{box-sizing:border-box;width:100%;max-width:420px;padding:2rem 1.5rem;background:#fff;border:1px solid #dce3df;border-radius:10px;box-shadow:0 4px 20px rgba(20,35,29,.07);text-align:center;overflow-wrap:anywhere}
+.admin-login-card h1{margin:0 0 1rem;font-size:1.5rem}
+.admin-login-card p{margin:0 0 1.5rem;line-height:1.7;color:#62736c}
+.admin-login-button{display:flex;justify-content:center;max-width:100%;overflow-x:auto}
+.admin-login-card [role=alert]{margin:1rem 0 0;color:#8b362b}
+@media(max-width:400px){.admin-login{padding:1rem}.admin-login-card{padding:1.5rem 1rem}}

@@ -70,7 +70,7 @@ test("candidate filters use only API attributes and preserve source order and da
 test("UI keeps filtering separate from selection and validation state", async () => {
   const panels = await readFile(new URL("./MajorPanels.tsx", import.meta.url), "utf8");
   const page = await readFile(new URL("./page.tsx", import.meta.url), "utf8");
-  assert.match(panels, /filterCandidates\(candidates, filter\)/);
+  assert.match(panels, /filterCandidates\(orderCandidates\(candidates\), filter\)/);
   assert.match(panels, /selected\.has\(candidate\.member_id\)/);
   assert.match(panels, /選択中の会員は現在の絞り込み結果には表示されていません/);
   assert.match(page, /useState<CandidateFilterId>\("all"\)/);

@@ -1,0 +1,5 @@
+.admin-loading-overlay{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;background:rgba(20,35,29,.38);pointer-events:auto;touch-action:none;outline:none;color:#1d2925}
+.admin-loading-content{display:grid;justify-items:center;gap:1rem;padding:1.5rem 2rem;border:1px solid #dce3df;border-radius:10px;background:#fff;box-shadow:0 6px 24px rgba(20,35,29,.15);font-weight:600}
+.admin-loading-spinner{width:2.25rem;height:2.25rem;border:3px solid #dce3df;border-top-color:#32705b;border-radius:50%;animation:admin-loading-spin .8s linear infinite}
+@keyframes admin-loading-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.admin-loading-spinner{animation:none}}

@@ -1,5 +1,8 @@
 "use client";
 
+import { LoadingOverlay } from "./LoadingOverlay";
+import { orderCandidates } from "./candidate-order";
+
 import { canAttemptSend, isLiveMode, modePresentation, safetyPrefix, sendWarning } from "./send-capability";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -49,6 +52,7 @@ export default function AdminPage() {
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryEvent[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [modeLoading, setModeLoading] = useState(true);
   const [jobsError, setJobsError] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -137,18 +141,19 @@ export default function AdminPage() {
     setLoading(true); setJobsError(false); clearFeedback();
     try { setJobs(await adminApi.jobs(signal)); }
     catch (e) { if (!(e instanceof DOMException && e.name === "AbortError")) { setJobsError(true); showError(e); } }
-    finally { setLoading(false); }
+    finally { if (!signal?.aborted) setLoading(false); }
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
     void loadJobs(controller.signal);
+    setModeLoading(true);
     void adminApi.lineSendMode(controller.signal).then((mode) => {
       if (active) setLineSendMode(mode);
     }).catch((e) => {
       if (active && !(e instanceof DOMException && e.name === "AbortError")) showError(e);
-    });
+    }).finally(() => { if (active) setModeLoading(false); });
     const saved = sessionStorage.getItem(STORAGE_KEY);
     const savedSelected = sessionStorage.getItem(SELECTED_KEY);
     if (savedSelected) {
@@ -189,7 +194,8 @@ export default function AdminPage() {
         else if (result.candidatesError) showError(result.candidatesError);
         setDeliveries(result.deliveries); setDeliveriesOperationId(result.deliveries ? result.operation.operation_id : null);
         if (result.deliveryError) setDeliveriesError("配信結果を取得できませんでした。配信結果だけを再読み込みしてください。");
-      }).finally(() => { if (active) setRestoringOperation(false); });
+      }).catch((e) => { if (active) showError(e); })
+        .finally(() => { if (active) setRestoringOperation(false); });
     } else setRestoringOperation(false);
     return () => { active = false; controller.abort(); };
   }, [loadJobs]);
@@ -273,14 +279,18 @@ export default function AdminPage() {
   async function loadJobAndCandidates(jobId: string): Promise<AdminJobDetail | null> {
     const requestId = ++jobRequestSequence.current;
     setBusy(true); clearFeedback(); setDetailError(false); setCandidatesError(false);
-    const [detailResult, candidateResult] = await Promise.allSettled([adminApi.job(jobId), adminApi.candidates(jobId)]);
-    if (requestId !== jobRequestSequence.current) return null;
-    if (detailResult.status === "fulfilled") setJob(detailResult.value);
-    else { setDetailError(true); showError(detailResult.reason); }
-    if (candidateResult.status === "fulfilled") setCandidates(candidateResult.value);
-    else { setCandidatesError(true); showError(candidateResult.reason); }
-    setBusy(false);
-    return detailResult.status === "fulfilled" ? detailResult.value : null;
+    try {
+      const [detailResult, candidateResult] = await Promise.allSettled([adminApi.job(jobId), adminApi.candidates(jobId)]);
+      if (requestId !== jobRequestSequence.current) return null;
+      if (detailResult.status === "fulfilled") setJob(detailResult.value);
+      else { setDetailError(true); showError(detailResult.reason); }
+      if (candidateResult.status === "fulfilled") setCandidates(candidateResult.value);
+      else { setCandidatesError(true); showError(candidateResult.reason); }
+      return detailResult.status === "fulfilled" ? detailResult.value : null;
+    } catch (e) {
+      if (requestId === jobRequestSequence.current) { setDetailError(true); setCandidatesError(true); showError(e); }
+      return null;
+    } finally { if (requestId === jobRequestSequence.current) setBusy(false); }
   }
 
   async function retryDetail() {
@@ -467,7 +477,8 @@ export default function AdminPage() {
     setSessionHistory((current) => [event, ...current].slice(0, 10));
   }
 
-  return <AdminShell mode={lineSendMode}><main className="admin-main">
+  const overlayActive = loading || modeLoading || restoringOperation || busy;
+  return <><LoadingOverlay active={overlayActive} /><AdminShell mode={lineSendMode}><main className="admin-main">
     <div className="sr-status" aria-live="polite">{loading || busy ? "処理中です…" : ""}</div>
     {error && <div className="admin-error" role="alert">{error}</div>}
     {success && <div className="admin-success" role="status">{success}</div>}
@@ -500,7 +511,7 @@ export default function AdminPage() {
     </div>
     {pendingTemplate && <Modal title="通知テンプレートを変更しますか？" onClose={() => setPendingTemplate(null)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setPendingTemplate(null)}>キャンセル</button><button className="admin-button" type="button" onClick={() => commitTemplate(pendingTemplate)}>テンプレートを適用</button></>}><p>現在の通知本文は、選択したテンプレートの内容で置き換えられます。</p></Modal>}
     {pendingJobId && <Modal title="求人を変更しますか？" onClose={() => setPendingJobId(null)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setPendingJobId(null)}>キャンセル</button><button className="admin-button danger" type="button" onClick={() => void switchToJob(pendingJobId)}>求人を変更する</button></>}><p>求人を変更すると、現在の通知本文、対象会員、検証結果は破棄されます。保存済みの旧通知履歴は削除されません。</p></Modal>}
-  </main></AdminShell>;
+  </main></AdminShell></>;
 }
 
 function Jobs({ jobs, loading, busy, retry, select }: { jobs: AdminJobSummary[]; loading: boolean; busy: boolean; retry: () => void; select: (id: string) => Promise<void> }) {
@@ -511,7 +522,7 @@ function Jobs({ jobs, loading, busy, retry, select }: { jobs: AdminJobSummary[];
 
 function JobAndCandidates({ job, candidates, selected, selectable, notificationType, setNotificationType, toggle, setSelected, begin, busy, back, detailError, candidatesError, retryDetail, retryCandidates, targetsPending }: { job: AdminJobDetail | null; candidates: AdminCandidate[]; selected: Set<string>; selectable: AdminCandidate[]; notificationType: NotificationType; setNotificationType: (v: NotificationType) => void; toggle: (id: string) => void; setSelected: (v: Set<string>) => void; begin: () => Promise<void>; busy: boolean; back: () => void; detailError: boolean; candidatesError: boolean; retryDetail: () => Promise<void>; retryCandidates: () => Promise<void>; targetsPending: boolean }) {
   return <>{detailError && <div className="admin-error">求人詳細を取得できませんでした。<button className="admin-button secondary" disabled={busy} onClick={() => void retryDetail()}>求人詳細を再読み込み</button></div>}{job && <article className="admin-card"><span className="admin-status">{jobStatus(job.status)}</span><h2>{job.title}</h2>{job.status !== "published" && <div className="admin-error">この求人は募集中ではありません。</div>}<p>{job.description}</p><p><strong>勤務地：</strong>{job.location ?? "未設定"}</p><p><strong>条件：</strong>{job.conditions.join("、") || "未設定"}</p><p><strong>募集：</strong>{job.openings}名　<strong>version：</strong>{job.version}</p><p><a className="admin-link" href={job.job_url} target="_blank" rel="noreferrer">求人リンクを確認</a></p>{job.contact && <p><strong>問い合わせ：</strong>{job.contact}</p>}</article>}
-    <section className="admin-card admin-section"><h2>候補会員</h2><p>選択可能な候補だけを全選択します。LINE未連携者を選択した場合は送信時にskippedになります。</p><div className="admin-actions"><button className="admin-button secondary" onClick={() => setSelected(new Set(selectable.map((x) => x.member_id)))}>選択可能な候補を全選択</button><button className="admin-button secondary" onClick={() => setSelected(new Set())}>全解除</button><strong>{selected.size}名選択中</strong></div>{!candidates.length ? <p className="admin-muted">候補会員はいません。</p> : <div className="admin-grid admin-section">{candidates.map((candidate) => <label className="admin-card candidate" key={candidate.member_id}><input type="checkbox" checked={selected.has(candidate.member_id)} disabled={!candidate.eligible} onChange={() => toggle(candidate.member_id)} /><span><strong>{candidate.display_name}</strong><br/><span className="admin-muted">{candidate.member_number ?? candidate.member_id}</span><br/>{candidate.line_linked ? "LINE連携済み" : "LINE未連携（skipped予定）"}・{candidate.eligible ? "対象" : "対象外"}{candidate.reason && <><br/>{reasonLabel(candidate.reason)}</>}</span></label>)}</div>}
+    <section className="admin-card admin-section"><h2>候補会員</h2><p>選択可能な候補だけを全選択します。LINE未連携者を選択した場合は送信時にskippedになります。</p><div className="admin-actions"><button className="admin-button secondary" onClick={() => setSelected(new Set(selectable.map((x) => x.member_id)))}>選択可能な候補を全選択</button><button className="admin-button secondary" onClick={() => setSelected(new Set())}>全解除</button><strong>{selected.size}名選択中</strong></div>{!candidates.length ? <p className="admin-muted">候補会員はいません。</p> : <div className="admin-grid admin-section">{orderCandidates(candidates).map((candidate) => <label className="admin-card candidate" key={candidate.member_id}><input type="checkbox" checked={selected.has(candidate.member_id)} disabled={!candidate.eligible} onChange={() => toggle(candidate.member_id)} /><span><strong>{candidate.display_name}</strong><br/><span className="admin-muted">{candidate.member_number ?? candidate.member_id}</span><br/>{candidate.line_linked ? "LINE連携済み" : "LINE未連携（skipped予定）"}・{candidate.eligible ? "対象" : "対象外"}{candidate.reason && <><br/>{reasonLabel(candidate.reason)}</>}</span></label>)}</div>}
       {candidatesError && <div className="admin-error">候補会員を取得できませんでした。<button className="admin-button secondary" disabled={busy} onClick={() => void retryCandidates()}>候補一覧を再読み込み</button></div>}{targetsPending && <div className="admin-info">通知操作は作成済みです。対象者の保存を再試行してください。</div>}<div className="admin-field admin-section"><label htmlFor="notification-type">通知種別</label><select id="notification-type" value={notificationType} onChange={(e) => setNotificationType(e.target.value as NotificationType)}><option value="new_job_match">新着求人マッチ</option><option value="existing_job_match">既存求人マッチ</option><option value="custom_job">個別求人</option></select></div><div className="admin-actions admin-section"><button className="admin-button secondary" onClick={back}>求人一覧へ戻る</button><button className="admin-button" disabled={!job || !selected.size || busy || job.status !== "published"} onClick={() => void begin()}>{busy ? "保存中…" : targetsPending ? "対象者の保存を再試行" : "通知文の編集へ"}</button></div></section></>;
 }
 

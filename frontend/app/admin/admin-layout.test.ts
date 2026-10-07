@@ -84,7 +84,7 @@ test("notification workspace omits the top step status and all six panel descrip
     "現在のoperationで確認できる操作だけを表示します。",
   ]) assert.doesNotMatch(page, new RegExp(text));
   assert.doesNotMatch(lowerPanels, /現在のoperationと、この画面を開いている間に確認できた操作だけを表示します。正式な監査履歴ではありません。/);
-  const workspace = page.slice(page.indexOf("return <AdminShell"), page.indexOf("function Jobs"));
+  const workspace = page.slice(page.indexOf("const overlayActive"), page.indexOf("function Jobs"));
   assert.doesNotMatch(workspace, /stepTitle\(step\)|statusLabel\(operation\.status\)|className="admin-toolbar"/);
   for (let panel = 1; panel <= 6; panel += 1) assert.match(workspace, new RegExp(`<AdminPanel number=\\{${panel}\\} title=`));
 });

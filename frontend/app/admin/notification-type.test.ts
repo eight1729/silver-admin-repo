@@ -201,3 +201,30 @@ test("member number is display-only; checkbox selection keeps UUID with null/abs
     assert.deepEqual(selected, [id]);
   }
 });
+
+
+test("candidate panel renders member number order before pagination and selects the original UUID", () => {
+  const Component = panels.CandidateSelectionPanel as (props: Record<string, unknown>) => React.ReactNode;
+  const selected: string[] = [];
+  const candidates = ["0003", "0001", "0002", "0010"].map(number => ({
+    member_id: `uuid-${number}`, member_number: number, display_name: "Member", eligible: true, line_linked: true,
+  }));
+  const tree = Component({ job: { job_id: "job-1", status: "published" }, candidates,
+    selected: new Set(), editable: true, busy: false, filter: "all", notificationType: "new_job_match",
+    toggle: (value: string) => selected.push(value), setFilter: () => {}, setNotificationType: () => {},
+  });
+  const html = renderToStaticMarkup(tree);
+  const positions = ["0001", "0002", "0003", "0010"].map(n => html.indexOf(`<th scope="row">${n}</th>`));
+  assert.ok(positions.every((p, index) => p >= 0 && (index === 0 || p > positions[index - 1])));
+  function visit(node: React.ReactNode) {
+    React.Children.forEach(node, child => {
+      if (!React.isValidElement(child)) return;
+      const element = child as React.ReactElement<any>;
+      if (element.type === "input" && element.props.name === "admin-selected-candidate") element.props.onChange();
+      visit(element.props.children);
+    });
+  }
+  visit(tree);
+  assert.deepEqual(selected, ["uuid-0001", "uuid-0002", "uuid-0003", "uuid-0010"]);
+  assert.equal(candidates[0].member_number, "0003");
+});
