@@ -1,4 +1,4 @@
-"""Explicit local wiring for the pre-split Admin-to-LINE HTTP boundary."""
+"""Shared local/production wiring using canonical Admin scopes."""
 
 from dataclasses import dataclass
 
@@ -19,26 +19,6 @@ class LocalIntegrationAdminComposition:
     external_business: object
     dispatch: object
     scope_resolver: object
-
-
-def build_local_integration_admin_composition(
-    *,
-    runtime_settings: AdminSettings,
-    engine=None,
-    client=None,
-    external_business=None,
-    queue=None,
-) -> LocalIntegrationAdminComposition:
-    if runtime_settings.app_env.strip().lower() != "local":
-        raise RuntimeError("Admin local integration mode requires APP_ENV=local")
-    if not runtime_settings.admin_local_integration_mode:
-        raise RuntimeError("Admin local integration mode is not enabled")
-    return build_admin_composition(
-        runtime_settings=runtime_settings,
-        scopes=runtime_settings.admin_local_integration_scopes,
-        runner_service_ids=runtime_settings.notification_runner_service_ids,
-        engine=engine, client=client, external_business=external_business, queue=queue,
-    )
 
 
 def build_admin_composition(*, runtime_settings, scopes, runner_service_ids, engine=None, client=None,

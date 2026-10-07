@@ -291,6 +291,7 @@ class NotificationService:
         require_scoped_queue: bool = False,
         persist_line_subjects: bool = True,
         reservation_guard: Callable[[str, int], Awaitable[None]] | None = None,
+        selected_recipient_limit: int | None = None,
     ) -> None:
         self._repository = repository
         self._external_business_gateway = external_business_gateway
@@ -306,6 +307,7 @@ class NotificationService:
         self._require_scoped_queue = require_scoped_queue
         self._persist_line_subjects = persist_line_subjects
         self._reservation_guard = reservation_guard
+        self._selected_recipient_limit = selected_recipient_limit
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -946,6 +948,15 @@ class NotificationService:
                 now,
             )
             raise OperationNotSendableError(f"operation cannot proceed: {reason}")
+
+        # Includes selected targets validation would skip; before creating any
+        # Delivery/Outbox. Atomic reservation also fences the validated snapshot.
+        if (self._selected_recipient_limit is not None
+                and summary.selected_target_count > self._selected_recipient_limit):
+            await self._audit(operation, "send_rejected", command.staff_id,
+                              {"reason": "local_recipient_limit_exceeded",
+                               "request_id": command.request_id}, self._now())
+            raise OperationNotSendableError("local_recipient_limit_exceeded")
 
         if self._pre_send_guard is not None:
             try:

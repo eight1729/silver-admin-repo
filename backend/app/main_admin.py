@@ -47,11 +47,8 @@ def create_admin_app(
     external_business_gateway=None,
 ) -> FastAPI:
     configure_database_url(runtime_settings.database_url)
-    environment = runtime_settings.app_env.strip().lower()
-    if environment not in {"local", "development", "demo", "staging", "production", "test"}:
-        raise RuntimeError("unsupported Admin application environment")
-    if runtime_settings.admin_local_integration_mode and environment != "local":
-        raise RuntimeError("Admin local integration mode requires APP_ENV=local")
+    from app.core.environment import application_environment
+    environment = application_environment(runtime_settings.app_env)
     app = FastAPI(
         title="Silver Admin Backend", version="1.0.0", lifespan=shared_lifespan,
         docs_url="/docs", redoc_url="/redoc", openapi_url="/openapi.json",
@@ -84,26 +81,6 @@ def create_admin_app(
     app.include_router(admin_internal_router, include_in_schema=False)
     if admin_service_provider is not None:
         app.dependency_overrides[get_admin_application_service] = admin_service_provider
-    elif runtime_settings.admin_local_integration_mode:
-        from app.runtime.admin_local_integration import (
-            build_local_integration_admin_composition,
-        )
-
-        composition = build_local_integration_admin_composition(
-            # The same instance here too: leaving it out would put the Internal
-            # API on the configured provider and local integration on the
-            # Current DB.
-            runtime_settings=runtime_settings,
-            external_business=external_business_gateway,
-        )
-        app.state.admin_local_integration = composition
-
-        def get_local_admin_application_service():
-            return composition.application
-
-        app.dependency_overrides[get_admin_application_service] = (
-            get_local_admin_application_service
-        )
     elif not injected_external_business and runtime_settings.notification_runner_service_ids:
         # Canonical production-shaped composition. Runner ownership is a
         # dedicated setting, separate from Internal API authorization scopes.
@@ -133,4 +110,9 @@ def create_admin_app(
     return app
 
 
-app = create_admin_app()
+def create_runtime_app() -> FastAPI:
+    admin_settings.validate_runtime()
+    return create_admin_app()
+
+
+app = create_runtime_app()

@@ -13,9 +13,7 @@ from app.services.http_client import aclose_client
 
 @asynccontextmanager
 async def shared_lifespan(app: FastAPI):
-    runner = getattr(getattr(app, "state", None), "admin_local_integration", None)
-    if runner is None:
-        runner = getattr(getattr(app, "state", None), "admin_runtime_composition", None)
+    runner = getattr(getattr(app, "state", None), "admin_runtime_composition", None)
     runner = getattr(getattr(runner, "boundary", None), "runner", None)
     try:
         if runner is not None:

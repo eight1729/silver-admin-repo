@@ -1,14 +1,15 @@
 export type KnownAppEnvironment =
   | "local"
-  | "development"
-  | "demo"
-  | "staging"
   | "production";
 
-export function normalizedAppEnvironment(value: string | undefined): string {
-  return value?.trim().toLowerCase() ?? "";
+export function normalizedAppEnvironment(value: string | undefined): KnownAppEnvironment {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized !== "local" && normalized !== "production") {
+    throw new Error("APP_ENV must be explicitly set to local or production");
+  }
+  return normalized;
 }
 
-export function isStagingEnvironment(value: string | undefined): boolean {
-  return normalizedAppEnvironment(value) === "staging";
+export function environmentLabel(value: string | undefined): string {
+  return normalizedAppEnvironment(value) === "local" ? "ローカル開発環境" : "本番環境";
 }

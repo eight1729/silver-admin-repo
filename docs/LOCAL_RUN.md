@@ -1,123 +1,91 @@
-# Admin ローカル起動手順
+# Admin local / production 起動手順
 
-## 1. 前提
+正式なAPP_ENVは `local` / `production` のみです。旧staging/development/demo/test、未知値・未設定は拒否します。NODE_ENVはNext.jsの別概念です。
 
-ローカル起動には次のものが必要です。
+## localの構成
 
-- Python 3 と `pip`
-- Node.js と `npm`
-- 接続可能な PostgreSQL Database
-- Repository root に配置した `.env.admin`
+localは実サービスによる統合検証環境です。両環境でGoogle GIS popup/callback、Backend OIDC署名・issuer・audience・expiry・sub検証、Staff DB identity/active/service permission/roleを使用します。Demo認証へfallbackしません。
 
-## 2. 初回セットアップ
+~~~text
+Admin Frontend (3001) -> Admin Backend (8082)
+                         |-> 開発PostgreSQL (Current DB / Staff / notification persistence)
+                         |-> https://silver-backend.ngrok.app -> Local LINE Backend -> LINE Messaging API
+~~~
 
-Repository root で、Backend の Python dependency を導入します。
+Python 3.12、Node.js 22（testsは22.13以降）、npmを使用します。依存の正本はbackend/requirements.txtとfrontend/package-lock.jsonです。依存導入、実env設定、実起動・実操作は人間が行います。
 
-```powershell
+## 人間によるlocal設定
+
+1. .env.admin.exampleを参考にrepository rootの実.env.adminを人間が設定します。local専用です。.env.exampleも同内容の参考templateです。
+2. Backend/Frontendを起動する両PowerShellで `$env:APP_ENV="local"` を明示します。dotenv内のAPP_ENVは環境選択に使われません。
+3. process envはowner dotenvより優先され、空文字も優先されます。古いshellの設定を確認してください。実secretはログやチャットへ貼らないでください。
+4. DATABASE_URLは開発DB。ADMIN_EXTERNAL_BUSINESS_BASE_URLを未設定/空にするとCurrent DB adapterを使います。外部業務APIは必須ではなく、Fakeにもfallbackしません。
+5. ADMIN_INTERNAL_API_SCOPESはservice_id -> organization_id、CURRENT_DB_BUSINESS_CENTERSはorganization_id -> center_codeのJSONです。ADMIN_NOTIFICATION_RUNNER_SERVICE_IDSは所有serviceの明示リスト。旧ADMIN_LOCAL_INTEGRATION_MODE / ADMIN_LOCAL_INTEGRATION_SCOPESは廃止しました。
+6. ADMIN_OIDC_ENABLED=true、issuer、audience、JWKS URL、許可algorithmを設定します。公開NEXT_PUBLIC_GOOGLE_CLIENT_IDとADMIN_OIDC_AUDIENCEは同じGoogle Web Client ID。StaffはDBのissuer + subjectとservice permissionで照合し、emailだけでは認可しません。
+7. NEXT_PUBLIC_ADMIN_API_BASE_URL=http://127.0.0.1:8082。空文字はエラーでありsame-originではありません。NEXT_PUBLIC_API_BASE_URL fallbackはownerキーが完全に未定義のときだけ有効です。
+8. NEXT_PUBLIC_ADMIN_SERVICE_IDにはStaff権限のあるserviceを指定。GoogleのAuthorized JavaScript Originには実際にブラウザで開くFrontend originを人間が登録します。popup/callbackを維持し、redirect方式へ変更しません。
+9. ADMIN_CORS_ALLOWED_ORIGINSに実Frontend originを登録します。http://localhost:3001とhttp://127.0.0.1:3001は別origin。両方使うならカンマ区切りで両方登録します。
+10. ADMIN_LINE_INTERNAL_API_BASE_URL=https://silver-backend.ngrok.app。ADMIN_LINE_INTERNAL_API_BEARER_TOKENは同じlocal LINEのLINE_INTERNAL_API_BEARER_TOKENと対応する値です。
+11. ADMIN_INTERNAL_API_BEARER_TOKENは逆方向LINE -> Admin用で、LINE_ADMIN_INTERNAL_API_BEARER_TOKENと対応。送信用Bearer・Google Staff Tokenと共用/fallbackしません。
+
+Adminはlocalhost構成を標準とし、Admin用ngrokは必須ではありません。fixed HTTPSを使うなら公開Frontend originをGoogle/CORSへ、公開Backend URLをFrontendへ設定します。LINE -> Adminの実検証で必要なら、人間がAdmin Backendの外部到達性を確保します。
+
+## Windows Backend: canonical SelectorEventLoop
+
+Python 3.12を使用します。Windows既定event loopによるasync psycopg接続問題を避けるため、次の既存方式を使用します。
+
+~~~powershell
 cd C:\path\to\silver-admin-repo
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r backend\requirements.txt
-```
-
-Frontend の dependency は、`package-lock.json` に従って導入します。
-
-```powershell
-cd C:\path\to\silver-admin-repo\frontend
-npm ci
-```
-
-## 3. 環境変数
-
-Repository root の [`.env.example`](../.env.example) を参照し、同じ場所に `.env.admin` を用意してください。少なくとも、Backend が使用する Database 接続設定と、Frontend から Admin Backend へ接続するための次の公開設定が必要です。
-
-```dotenv
-NEXT_PUBLIC_ADMIN_API_BASE_URL=http://127.0.0.1:8082
-NEXT_PUBLIC_ADMIN_SERVICE_ID=<使用するサービスID>
-```
-
-Backend が Frontend origin を許可するよう、`ADMIN_CORS_ALLOWED_ORIGINS` に `http://127.0.0.1:3001` を設定してください。その他の値は利用環境に応じて `.env.example` を基準に設定します。秘密情報や接続情報は文書やGit管理対象へ記載しないでください。
-
-Backend と Admin Frontend は、どちらもsource/configの位置からRepository rootの `.env.admin` を参照します。Frontend loaderが読み込むのは `APP_ENV` と `NEXT_PUBLIC_*` のみです。また、起動済みPowerShellに同名の環境変数がある場合は、その値が `.env.admin` より優先されます。
-
-## 4. Admin Backendの起動
-
-WindowsでPostgreSQLを利用する場合は、既知の動作確認済み手順としてSelector event loopを明示します。Repository rootで次を実行してください。
-
-```powershell
-cd C:\path\to\silver-admin-repo
+$env:APP_ENV="local"
 $env:PYTHONPATH="backend"
-
 @'
 import asyncio
 import selectors
 import uvicorn
 from app.main_admin import app
 
-config = uvicorn.Config(
-    app,
-    host="127.0.0.1",
-    port=8082,
-    loop="asyncio",
-)
+config = uvicorn.Config(app, host="127.0.0.1", port=8082, loop="asyncio")
 server = uvicorn.Server(config)
-
 asyncio.run(
     server.serve(),
-    loop_factory=lambda: asyncio.SelectorEventLoop(
-        selectors.SelectSelector()
-    ),
+    loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
 )
 '@ | python
-```
+~~~
 
-canonical entrypointは `backend/app/main_admin.py` です。Repository rootから `app` packageをimportするため、上記手順では `PYTHONPATH=backend` を設定しています。
+canonical entrypointはbackend/app/main_admin.pyです。必要設定不足時は起動失敗します。/healthはprocess healthのみで、DB/OIDC/LINEの成功確認ではありません。
 
-## 5. Backend確認
+## Frontend
 
-別のPowerShellでhealth endpointを確認します。
+別PowerShellで実行します。
 
-```powershell
-curl.exe http://127.0.0.1:8082/health
-```
-
-HTTP 200と、Admin Backendを示すJSONが返れば起動できています。このendpointはDatabase接続確認ではなく、application processのhealth確認です。
-
-## 6. Admin Frontendの起動
-
-Backendとは別のPowerShellを開き、Frontend directoryからAdmin targetを起動します。
-
-```powershell
+~~~powershell
 cd C:\path\to\silver-admin-repo\frontend
+$env:APP_ENV="local"
 npm run dev -- -p 3001
-```
+~~~
 
-このcommandは `frontend/package.json` の `dev` scriptを使用し、`targets/admin` をNext.js applicationとして起動します。
+canonical targetはfrontend/targets/adminです。npm run dev/build/startはenv検証launcherを経由します。nextを直接呼ばないでください。Next target内の標準.env / .env.local / .env.production*等は禁止し、Nextが読む前にファイル名検査で拒否します。localのowner .env.adminだけを許可します。
 
-## 7. Admin画面確認
+ブラウザでGoogleに登録したoriginの/adminを開き、Google Loginを人間が確認します。
 
-ブラウザで次を開きます。
+## 送信制御とManual Gate
 
-```text
-http://127.0.0.1:3001/admin
-```
+Backendはlocalでselected target count > 10を送信予約・Delivery/Outbox生成前に拒否します。11 selected / 10 sendable（1 skipped）も拒否します。10以下でもLINE capabilityがready=false、取得失敗、上限超過なら拒否します。productionには固定10人上限を適用しません。
 
-最低限、次を確認してください。
+Frontendにもlocal有効上限（10とLINE上限の小さい方）を返します。UIだけを安全根拠にはしません。staging_liveはlocal安全送信を表す既存wire labelで、APP_ENV=stagingではありません。旧readiness endpoint/schemaも維持します。
 
-- Admin画面が表示される
-- 求人情報が読み込まれる
-- ブラウザからAdmin Backendへのrequestが成功する
+runnerは起動後に保存済み未完了Operationを再開します。接続前に開発DB・所有service・未完了送信を人間が確認してください。DB schema/migration/provisioning変更はこのSliceに含みません。
 
-求人情報の取得には、`.env.admin` のDatabase・local integration・認証関連設定が実行環境に合っている必要があります。
+人間が確認する項目：Google Origin、開発Staff identity/permission、開発DB、LINE local安全設定、ngrok、両BackendとFrontend起動、Google Login、1人送信、複数人送信、10人境界、11人拒否、sender icon表示。
 
-## 8. 停止方法
+## production
 
-BackendとFrontendは、それぞれを起動したPowerShellで `Ctrl + C` を押して停止します。
+APP_ENV=productionと全設定をCloud process env / Secretで指定します。Backend/Frontendともlocal owner dotenvへfallbackしません。不足設定はstartup/buildを失敗させます。production DB、LINE Backend、双方向Bearerをlocalと分離し、LINE/外部業務APIへのHTTPSを維持します。HTTPSだけでは接続先環境を識別できないため、URLとcredentialの組合せを人間が確認します。
 
-## 9. よくある注意点
+NEXT_PUBLIC_*はbuild-timeにbundleへ固定され、runtime env変更だけでは接続先を切り替えられません。変更時は再buildし、APP_ENVと公開設定をbuild/startで一致させます。VercelでもBuild Commandはnpm run buildを使用し、Cloud側で設定します。deploymentは人間が実施します。
 
-- `.env.admin` がRepository rootにない場合、Backendの必須設定を解決できません。
-- Frontendのcommandは `frontend` directoryで実行してください。
-- 古いPowerShell sessionに残る `NEXT_PUBLIC_*` は `.env.admin` の同名設定より優先されます。設定変更後は新しいsessionで起動してください。
-- `8082` または `3001` が既に使用中の場合、対応するprocessを起動できません。
-- WindowsでPostgreSQL接続時にevent loop由来の接続問題が起きる場合は、通常のUvicorn commandではなく「4. Admin Backendの起動」のSelector event loop手順を使用してください。
+## Offline検証
+
+Backend: backend directoryでpython -m pytest。test harnessが実dotenv・外部socket・PostgreSQL接続を拒否します。SQL回帰testsは破棄可能なin-memory SQLiteのみ。PostgreSQLロック等の実動作はManual Gateです。
+Frontend: npm test、npm run test:config、npm run typecheck。production build検証にはAPP_ENV=productionとdummy公開設定を明示し、実envを使いません。

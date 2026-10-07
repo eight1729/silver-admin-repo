@@ -179,9 +179,9 @@ test("API 403 preserves the credential and reports forbidden without granting pe
   assert.equal(b.storage.get(key), credential());
 });
 
-test("production middleware routes to login until the GIS flow sets the UI hint", () => {
+for (const environment of ["local", "production"]) test(`${environment} middleware routes to login until GIS sets the UI hint`, () => {
   const b = browser();
-  vm.runInContext('process.env.APP_ENV = "production"', b.context);
+  vm.runInContext(`process.env.APP_ENV = "${environment}"`, b.context);
   const { middleware } = b.load(resolve(here, "../../targets/admin/middleware.ts"));
   const request = (path: string, hint?: string) => ({
     nextUrl: { pathname: path, clone: () => new URL(`https://admin.example.test${path}`) },
@@ -205,7 +205,7 @@ test("production UI mounts login before protected children; forbidden and logout
   assert.match(boundary, /この画面を利用する権限がありません/);
   assert.match(boundary, /logoutStaff\(\); window.location.replace\("\/auth-required"\)/);
   const layout = readFileSync(resolve(here, "layout.tsx"), "utf8");
-  assert.match(layout, /APP_ENV === "production"/);
+  assert.match(layout, /<AdminAuthBoundary>/);
   const login = readFileSync(resolve(here, "StaffLogin.tsx"), "utf8");
   assert.match(login, /if \(accepted\) window.location.replace\("\/"\)/);
 });

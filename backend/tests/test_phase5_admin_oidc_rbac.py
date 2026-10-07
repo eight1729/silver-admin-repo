@@ -178,8 +178,9 @@ async def test_rbac_viewer_operator_admin():
     assert insufficient.value.status_code == 403
 
 
-def test_production_missing_token_and_disabled_oidc_fail_closed():
-    settings = AdminSettings(app_env="production", admin_oidc_enabled=False)
+@pytest.mark.parametrize("environment", ["local", "production"])
+def test_missing_token_and_disabled_oidc_fail_closed(environment):
+    settings = AdminSettings(app_env=environment, admin_oidc_enabled=False)
     with pytest.raises(HTTPException) as missing:
         get_staff_authenticator_http(None, None, settings, Repository())
     assert missing.value.status_code == 401
@@ -201,12 +202,13 @@ def test_production_missing_token_and_disabled_oidc_fail_closed():
         ("authorized", 200), ("config", 503),
     ],
 )
-async def test_production_bearer_staff_authorization_http(oidc_material, monkeypatch, case, expected):
+@pytest.mark.parametrize("environment", ["local", "production"])
+async def test_bearer_staff_authorization_http(oidc_material, monkeypatch, case, expected, environment):
     """Exercise real HTTP Bearer and exception mapping without DB or external JWKS."""
     issue, jwks_client = oidc_material
     monkeypatch.setattr("app.services.http_client.get_client", lambda: jwks_client)
     settings = AdminSettings(
-        app_env="production", admin_oidc_enabled=True,
+        app_env=environment, admin_oidc_enabled=True,
         admin_oidc_issuer=ISSUER, admin_oidc_audience="" if case == "config" else AUDIENCE,
         admin_oidc_jwks_url="https://idp.example.test/jwks", admin_oidc_algorithms="RS256",
     )

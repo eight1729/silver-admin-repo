@@ -547,10 +547,10 @@ def admin_settings_for(monkeypatch, **overrides):
     from pydantic_settings import DotEnvSettingsSource
     monkeypatch.setattr(DotEnvSettingsSource, "_read_env_files", lambda self: {})
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused/unused")
-    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("APP_ENV", "local")
     from app.core.settings_admin import AdminSettings
 
-    overrides.setdefault("app_env", "test")
+    overrides.setdefault("app_env", "local")
     return AdminSettings(
         _env_file=None, database_url="postgresql://unused/unused",
         admin_internal_api_bearer_token=SecretStr("test-incoming"),
@@ -721,15 +721,13 @@ def test_local_integration_also_receives_the_configured_provider(monkeypatch):
     settings = admin_settings_for(
         monkeypatch,
         app_env="local",
-        admin_local_integration_mode=True,
-        admin_local_integration_scopes={"service-a": ORG},
         admin_external_business_base_url=BASE,
     )
     app = create_admin_app(settings)
 
     internal = app.state.admin_internal_business_gateway
     assert isinstance(internal, HttpExternalBusinessGateway)
-    assert app.state.admin_local_integration.external_business is internal
+    assert app.state.admin_runtime_composition.external_business is internal
 
 
 # ---------------------------------------------------------------------------

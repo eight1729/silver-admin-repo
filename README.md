@@ -175,3 +175,16 @@ RIGHTS.md
 
 正式な契約書が別途締結されている場合は、その契約内容が優先されます。
 Notification runner ownership is configured separately with `ADMIN_NOTIFICATION_RUNNER_SERVICE_IDS`. `ADMIN_INTERNAL_API_SCOPES` remains an inbound API authorization map.
+
+
+## Runtime環境: local / production
+
+正式なAPP_ENVは`local` / `production`のみです。起動processで必ず明示し、未知値や旧staging/development/demo/testは拒否します。NODE_ENVは別概念です。
+
+localも実Google Staff OIDC + Staff DB permission、開発DB read/write、実LINE Internal APIを使用します。Demo認証/Fake providerへfallbackしません。標準はCurrent DB、Frontend 3001、Backend 8082、Python 3.12のWindows SelectorEventLoopです。LINE接続は`ADMIN_LINE_INTERNAL_API_BASE_URL=https://silver-backend.ngrok.app`を人間が設定します。
+
+localはrepository rootの`.env.admin`を利用可能、productionはCloud process env / Secretのみでdotenvへfallbackしません。Frontendは`npm run dev/build/start`のenv検証launcherを使用し、公開設定はbuild-timeに固定されます。
+
+localのselected人数上限は10で、Backendが送信前に保証します。11 selected / 10 sendableも拒否します。LINE capabilityの制御と`staging_live`互換wire labelは維持します。
+
+旧local integration設定は廃止し、`ADMIN_INTERNAL_API_SCOPES`と`ADMIN_NOTIFICATION_RUNNER_SERVICE_IDS`へ統一しました。実env設定、Google Console/Login、DB確認、ngrok、起動、実送信、sender icon確認、production設定/deploymentは人間のManual Gateです。詳細は[local手順](docs/LOCAL_RUN.md)と[deployment手順](docs/DEPLOYMENT_RUNBOOK.md)を参照してください。

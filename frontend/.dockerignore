@@ -8,6 +8,7 @@
 !app/**
 !config/
 !config/load-target-env.js
+!config/run-next.js
 !targets/
 !targets/admin/
 !targets/admin/**
