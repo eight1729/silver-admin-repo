@@ -34,6 +34,7 @@ class AdminJobDetailResponse(BaseModel):
 
 class AdminCandidateResponse(BaseModel):
     member_id: str
+    member_number: str | None = None
     display_name: str
     line_linked: bool
     eligible: bool

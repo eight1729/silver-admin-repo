@@ -176,3 +176,28 @@ test("candidate checkboxes preserve multiple selection across pages and filters 
     assert.equal(inputs(render("all", false))[1].props.disabled, true);
   } finally { candidatePage = 1; }
 });
+
+
+test("member number is display-only; checkbox selection keeps UUID with null/absent fallback", () => {
+  const Component = panels.CandidateSelectionPanel as (props: Record<string, unknown>) => React.ReactNode;
+  const id = "144813ad-bed4-4330-b592-0e6aebcfd1bc";
+  for (const number of ["0001", null, undefined]) {
+    const selected: string[] = [];
+    const tree = Component({ job: { job_id: "job-1", status: "published" },
+      candidates: [{ member_id: id, member_number: number, display_name: "Member", eligible: true, line_linked: true }],
+      selected: new Set(), editable: true, busy: false, filter: "all", notificationType: "new_job_match",
+      toggle: (value: string) => selected.push(value), setFilter: () => {}, setNotificationType: () => {},
+    });
+    assert.ok(renderToStaticMarkup(tree).includes(`<th scope="row">${number ?? id}</th>`));
+    function visit(node: React.ReactNode) {
+      React.Children.forEach(node, child => {
+        if (!React.isValidElement(child)) return;
+        const element = child as React.ReactElement<any>;
+        if (element.type === "input" && element.props.name === "admin-selected-candidate") element.props.onChange();
+        visit(element.props.children);
+      });
+    }
+    visit(tree);
+    assert.deepEqual(selected, [id]);
+  }
+});

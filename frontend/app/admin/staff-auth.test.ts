@@ -22,6 +22,7 @@ function browser(saved?: string) {
   let timerId = 0;
   let cookie = "";
   let status = 200;
+  let requestBody: string | undefined;
   let requestHeaders: Record<string, string> = {};
   let options: any;
   let rendered = 0;
@@ -45,6 +46,7 @@ function browser(saved?: string) {
     process: { env: { NEXT_PUBLIC_ADMIN_API_BASE_URL: "https://admin-api.example.test", NEXT_PUBLIC_ADMIN_SERVICE_ID: "service-a" } },
     dispatchEvent: events.dispatchEvent.bind(events),
     fetch: async (_url: string, init: RequestInit) => {
+      requestBody = init.body as string | undefined;
       requestHeaders = init.headers as Record<string, string>;
       return { ok: status === 200, status, json: async () => status === 200 ? [] : { detail: { error: "denied" } } };
     },
@@ -67,6 +69,7 @@ function browser(saved?: string) {
     auth, api, storage, document, window, context, load,
     get options() { return options; }, get rendered() { return rendered; }, get disabled() { return disabled; },
     get headers() { return requestHeaders; },
+    get body() { return requestBody; },
     respond: (value: number) => { status = value; },
     expire: () => { clock += 61_000; [...timers.values()].forEach((callback) => callback()); },
   };
@@ -208,4 +211,12 @@ test("production UI mounts login before protected children; forbidden and logout
   assert.match(layout, /<AdminAuthBoundary>/);
   const login = readFileSync(resolve(here, "StaffLogin.tsx"), "utf8");
   assert.match(login, /if \(accepted\) window.location.replace\("\/"\)/);
+});
+
+
+test("target payload retains UUID selection instead of display member number", async () => {
+  const b = browser();
+  const candidate = { member_id: "144813ad-bed4-4330-b592-0e6aebcfd1bc", member_number: "0001" };
+  await b.api.updateTargets("operation", [candidate.member_id, candidate.member_id]);
+  assert.deepEqual(JSON.parse(b.body!), { selected_member_ids: [candidate.member_id] });
 });

@@ -87,6 +87,7 @@ class AdminCandidate:
     selected: bool = False
     line_subject: str | None = None
     preference_summary: str | None = None
+    member_number: str | None = None
 
 
 class AdminApplicationService:
@@ -229,6 +230,7 @@ class AdminApplicationService:
                 None if self._line_internal_client is not None else item.line_subject
             ),
             preference_summary=item.preference_summary,
+            member_number=item.member_number,
         )
 
     def _line_scope(self, service_id: str) -> ServiceOrganizationScope:

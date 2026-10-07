@@ -7,7 +7,7 @@ export type DeliveryStatus = "pending" | "sent" | "failed" | "unknown" | "skippe
 
 export interface AdminJobSummary { job_id: string; title: string; location: string | null; status: JobStatus; openings: number; version: string; summary: string | null; work_days?: string | null; work_time?: string | null }
 export interface AdminJobDetail { job_id: string; title: string; description: string; location: string | null; conditions: string[]; status: JobStatus; openings: number; version: string; job_url: string; contact: string | null }
-export interface AdminCandidate { member_id: string; display_name: string; line_linked: boolean; eligible: boolean; reason: string | null; selected: boolean; preference_summary?: string | null }
+export interface AdminCandidate { member_id: string; member_number?: string | null; display_name: string; line_linked: boolean; eligible: boolean; reason: string | null; selected: boolean; preference_summary?: string | null }
 export interface AdminMessage { greeting: string; introduction: string; note: string }
 export interface AdminOperation { operation_id: string; job_id: string; job_version: string | null; notification_type: NotificationType; message: AdminMessage; status: OperationStatus; target_count: number; selected_count: number; validated_at: string | null; send_requested_at: string | null; completed_at: string | null; created_at: string; updated_at: string }
 export interface AdminValidation { operation_id: string; status: OperationStatus; can_proceed: boolean; selected_count: number; sendable_count: number; skipped_count: number; reasons: string[]; version_changed: boolean; external_system_blocked: boolean }

@@ -225,13 +225,14 @@ class CurrentDbExternalBusinessGateway:
     ) -> list[CandidateMember]:
         center = self._center(external_organization_id)
         job_id = self._job_id(external_job_id)
-        rows = await self._rows(select(_members.c.id, _members.c.full_name).select_from(
+        rows = await self._rows(select(_members.c.id, _members.c.full_name, _members.c.member_code).select_from(
             _members.join(_recommendations, _recommendations.c.member_id == _members.c.id)
             .join(_jobs, _jobs.c.id == _recommendations.c.job_id)
         ).where(_jobs.c.id == job_id, _jobs.c.center_code == center,
                 _members.c.center_code == center, _recommendations.c.center_code == center,
                 _recommendations.c.is_recommended.is_(True)).order_by(_members.c.id))
-        return [CandidateMember(str(row["id"]), row["full_name"], True, (), None) for row in rows]
+        return [CandidateMember(str(row["id"]), row["full_name"], True, (), None,
+                                member_number=row["member_code"]) for row in rows]
 
     async def validate_notification_targets(
         self, *, external_organization_id: str, external_job_id: str,

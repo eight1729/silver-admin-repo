@@ -215,6 +215,7 @@ async def list_candidates(
         return tuple(
             AdminCandidateResponse(
                 member_id=item.member_id,
+                member_number=item.member_number,
                 display_name=item.display_name,
                 line_linked=item.line_linked,
                 eligible=item.eligible,

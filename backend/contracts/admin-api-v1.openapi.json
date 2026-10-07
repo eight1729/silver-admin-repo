@@ -19,6 +19,17 @@
             "title": "Member Id",
             "type": "string"
           },
+          "member_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Number"
+          },
           "preference_summary": {
             "anyOf": [
               {
