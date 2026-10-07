@@ -1,3 +1,5 @@
+from app.core.jobs_diagnostics import jobs_point, jobs_failure
+
 from collections import Counter
 from uuid import UUID, uuid4
 
@@ -133,9 +135,12 @@ async def list_jobs(
     staff: AuthenticatedStaff = Depends(require_admin_viewer),
     service: AdminApplicationService = Depends(get_admin_application_service),
 ):
+    jobs_point("admin_jobs_route", "list_jobs_start")
+    stage = "list_jobs_application"
     try:
         jobs = await service.list_jobs(staff.service_id)
-        return tuple(
+        stage = "list_jobs_response"
+        response = tuple(
             AdminJobSummaryResponse(
                 job_id=item.external_job_id,
                 title=item.title,
@@ -148,7 +153,10 @@ async def list_jobs(
             )
             for item in jobs
         )
+        jobs_point("admin_jobs_route", "list_jobs_complete")
+        return response
     except Exception as exc:
+        jobs_failure("admin_jobs_route", stage, exc)
         _translate(exc)
 
 

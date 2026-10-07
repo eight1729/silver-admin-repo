@@ -4,6 +4,8 @@ These table clauses describe reads only: no shared metadata, reflection or DDL.
 They are not the schema contract of a future production business provider.
 """
 
+from app.core.jobs_diagnostics import jobs_point, jobs_failure
+
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from uuid import UUID
@@ -178,25 +180,45 @@ class CurrentDbExternalBusinessGateway:
     async def search_jobs(
         self, *, external_organization_id: str, query: JobSearchQuery,
     ) -> PagedExternalJobs:
-        center = self._center(external_organization_id)
-        conditions = [_jobs.c.center_code == center]
-        if query.statuses:
-            conditions.append(_jobs.c.status.in_([status.value for status in query.statuses]))
-        if query.updated_from is not None:
-            conditions.append(_jobs.c.updated_at >= query.updated_from)
-        if query.updated_to is not None:
-            conditions.append(_jobs.c.updated_at <= query.updated_to)
-        if query.keyword and query.keyword.strip():
-            pattern = f"%{query.keyword.strip()}%"
-            conditions.append(or_(_jobs.c.title.ilike(pattern), _jobs.c.summary.ilike(pattern),
-                                  _jobs.c.location_text.ilike(pattern)))
-        where = and_(*conditions)
-        count_rows = await self._rows(select(func.count().label("total")).select_from(_jobs).where(where))
-        total = int(count_rows[0]["total"]) if count_rows else 0
-        rows = await self._rows(select(_jobs).where(where).order_by(_jobs.c.updated_at.desc(), _jobs.c.id)
-                                .offset((query.page - 1) * query.page_size).limit(query.page_size))
-        return PagedExternalJobs(tuple(self._job_summary(row) for row in rows), query.page, query.page_size,
-                                 total, (query.page * query.page_size) < total)
+        stage = "search_jobs_center_mapping"
+        try:
+            center = self._center(external_organization_id)
+            jobs_point("current_db_business", "search_jobs_start", "center_mapping_found=true")
+            stage = "search_jobs_query_build"
+            conditions = [_jobs.c.center_code == center]
+            if query.statuses:
+                conditions.append(_jobs.c.status.in_([status.value for status in query.statuses]))
+            if query.updated_from is not None:
+                conditions.append(_jobs.c.updated_at >= query.updated_from)
+            if query.updated_to is not None:
+                conditions.append(_jobs.c.updated_at <= query.updated_to)
+            if query.keyword and query.keyword.strip():
+                pattern = f"%{query.keyword.strip()}%"
+                conditions.append(or_(_jobs.c.title.ilike(pattern), _jobs.c.summary.ilike(pattern),
+                                      _jobs.c.location_text.ilike(pattern)))
+            where = and_(*conditions)
+            stage = "search_jobs_count_query"
+            count_rows = await self._rows(select(func.count().label("total")).select_from(_jobs).where(where))
+            jobs_point("current_db_business", "search_jobs_count_loaded", "count_loaded=true")
+            stage = "search_jobs_count_conversion"
+            total = int(count_rows[0]["total"]) if count_rows else 0
+            stage = "search_jobs_rows_query"
+            rows = await self._rows(select(_jobs).where(where).order_by(_jobs.c.updated_at.desc(), _jobs.c.id)
+                                    .offset((query.page - 1) * query.page_size).limit(query.page_size))
+            jobs_point("current_db_business", "search_jobs_rows_loaded", "rows_loaded=true")
+            stage = "job_summary"
+            # One pair for the whole batch, including empty results and later-row failures.
+            jobs_point("current_db_business", "job_summary_start")
+            items = tuple(self._job_summary(row) for row in rows)
+            jobs_point("current_db_business", "job_summary_complete")
+            stage = "search_jobs_response"
+            result = PagedExternalJobs(items, query.page, query.page_size,
+                                      total, (query.page * query.page_size) < total)
+            jobs_point("current_db_business", "search_jobs_complete")
+            return result
+        except Exception as exc:
+            jobs_failure("current_db_business", stage, exc)
+            raise
 
     async def list_candidate_members(
         self, *, external_organization_id: str, external_job_id: str,
