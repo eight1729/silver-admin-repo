@@ -1,5 +1,7 @@
 "use client";
 
+import "./staff-login.css";
+
 import { useEffect, useRef, useState } from "react";
 import { renderStaffSignIn, startStaffAuth } from "./staff-auth";
 
@@ -18,10 +20,10 @@ export function StaffLogin() {
     }).catch(() => { if (active) setFailed(true); });
     return () => { active = false; };
   }, [clientId]);
-  return <main>
-    <h1>管理画面の認証が必要です</h1>
+  return <main className="admin-login"><section className="admin-login-card" aria-labelledby="admin-login-title">
+    <h1 id="admin-login-title">管理画面</h1>
     <p>登録済みスタッフのGoogleアカウントでログインしてください。</p>
-    {!clientId ? <p role="alert">ログイン設定が未完了のため利用できません。</p> : <div ref={button} />}
+    {!clientId ? <p role="alert">ログイン設定が未完了のため利用できません。</p> : <div className="admin-login-button" ref={button} />}
     {failed && <p role="alert">ログインできませんでした。ページを再読み込みしてお試しください。</p>}
-  </main>;
+  </section></main>;
 }

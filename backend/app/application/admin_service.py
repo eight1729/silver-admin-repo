@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.core.jobs_diagnostics import jobs_point, jobs_failure
+
 from dataclasses import dataclass
 from typing import Callable
 from uuid import UUID
@@ -85,6 +87,7 @@ class AdminCandidate:
     selected: bool = False
     line_subject: str | None = None
     preference_summary: str | None = None
+    member_number: str | None = None
 
 
 class AdminApplicationService:
@@ -145,11 +148,21 @@ class AdminApplicationService:
         )
 
     async def list_jobs(self, service_id: str) -> tuple[ExternalJobSummary, ...]:
-        scope = self._business_scope(service_id)
-        result = await self._external.search_jobs(
-            external_organization_id=scope.organization_id, query=JobSearchQuery()
-        )
-        return tuple(result.items)
+        stage = "list_jobs_scope"
+        jobs_point("admin_application", "list_jobs_start")
+        try:
+            scope = self._business_scope(service_id)
+            stage = "list_jobs_provider"
+            result = await self._external.search_jobs(
+                external_organization_id=scope.organization_id, query=JobSearchQuery()
+            )
+            stage = "list_jobs_response"
+            items = tuple(result.items)
+            jobs_point("admin_application", "list_jobs_complete")
+            return items
+        except Exception as exc:
+            jobs_failure("admin_application", stage, exc)
+            raise
 
     async def get_job(self, service_id: str, job_id: str) -> ExternalJobDetail:
         scope = self._business_scope(service_id)
@@ -217,6 +230,7 @@ class AdminApplicationService:
                 None if self._line_internal_client is not None else item.line_subject
             ),
             preference_summary=item.preference_summary,
+            member_number=item.member_number,
         )
 
     def _line_scope(self, service_id: str) -> ServiceOrganizationScope:

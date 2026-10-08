@@ -31,10 +31,8 @@ def get_staff_authenticator_http(
     runtime_settings: AdminSettings = Depends(get_admin_runtime_settings),
     repository=Depends(get_staff_identity_repository),
 ) -> StaffAuthenticator:
-    environment = runtime_settings.app_env.strip().lower()
-    if environment in {"local", "development", "demo", "staging", "test"}:
-        from app.adapter.staff_auth import DemoStaffAuthenticator
-        return DemoStaffAuthenticator(service_id=service_id or "demo-service")
+    from app.core.environment import application_environment
+    application_environment(runtime_settings.app_env)
     if credentials is None:
         raise HTTPException(status_code=401, detail={"error": "authorization_required"})
     if not runtime_settings.admin_oidc_enabled:

@@ -11,9 +11,9 @@ test("Admin target builds and serves only its owned routes", () => {
   assert.match(root, /AdminLayout/);
   assert.match(root, /AdminPage/);
   assert.doesNotMatch(root + middleware, /app\/liff|liff-api|LIFF/);
-  assert.equal(pkg.scripts.dev, "next dev targets/admin");
-  assert.equal(pkg.scripts.build, "next build targets/admin");
-  assert.equal(pkg.scripts.start, "next start targets/admin");
+  assert.equal(pkg.scripts.dev, "node config/run-next.js dev");
+  assert.equal(pkg.scripts.build, "node config/run-next.js build");
+  assert.equal(pkg.scripts.start, "node config/run-next.js start");
 });
 
 test("frontend target configs expose no backend credentials", () => {
@@ -31,7 +31,7 @@ test("frontend target configs expose no backend credentials", () => {
 test("Admin guard is supplemental and API authentication failures remain explicit", () => {
   const middleware = read("../../targets/admin/middleware.ts");
   const client = read("../lib/admin-api.ts");
-  assert.match(middleware, /APP_ENV === "production"/);
+  assert.match(middleware, /normalizedAppEnvironment\(process.env.APP_ENV\)/);
   assert.match(middleware, /admin_authenticated/);
   assert.match(middleware, /\/auth-required/);
   assert.match(client, /Authorization: `Bearer \$\{accessToken\}`/);

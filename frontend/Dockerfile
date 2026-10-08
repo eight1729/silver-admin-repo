@@ -36,9 +36,16 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     APP_ENV=${APP_ENV} \
     PORT=8080
+ARG NEXT_PUBLIC_ADMIN_API_BASE_URL
+ARG NEXT_PUBLIC_ADMIN_SERVICE_ID
+ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
+ENV NEXT_PUBLIC_ADMIN_API_BASE_URL=${NEXT_PUBLIC_ADMIN_API_BASE_URL} \
+    NEXT_PUBLIC_ADMIN_SERVICE_ID=${NEXT_PUBLIC_ADMIN_SERVICE_ID} \
+    NEXT_PUBLIC_GOOGLE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_CLIENT_ID}
 COPY --from=production-dependencies --chown=node:node /app/frontend/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/frontend/package.json ./package.json
 COPY --from=build --chown=node:node /app/frontend/config/load-target-env.js ./config/load-target-env.js
+COPY --from=build --chown=node:node /app/frontend/config/run-next.js ./config/run-next.js
 COPY --from=build --chown=node:node /app/frontend/targets/admin/next.config.js ./targets/admin/next.config.js
 COPY --from=build --chown=node:node /app/frontend/targets/admin/public ./targets/admin/public
 COPY --from=build --chown=node:node /app/frontend/targets/admin/.next-admin ./targets/admin/.next-admin

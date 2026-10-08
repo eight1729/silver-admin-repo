@@ -247,15 +247,14 @@ async def test_admin_entrypoint_wiring_without_reading_dotenv(monkeypatch):
     from pydantic_settings import DotEnvSettingsSource
     monkeypatch.setattr(DotEnvSettingsSource, "_read_env_files", lambda self: {})
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused/unused")
-    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("APP_ENV", "local")
     from app.core.settings_admin import AdminSettings
     from app.main_admin import create_admin_app
 
     settings = AdminSettings(
-        _env_file=None, app_env="test", database_url="postgresql://unused/unused",
+        _env_file=None, app_env="local", database_url="postgresql://unused/unused",
         admin_internal_api_bearer_token=SecretStr("test-incoming"),
         admin_internal_api_scopes={"service-a": "organization-a"},
-        admin_local_integration_mode=False,
     )
     provider = Provider()
     app = create_admin_app(settings, external_business_gateway=provider)

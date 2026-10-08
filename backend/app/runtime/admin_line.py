@@ -15,6 +15,7 @@ from app.application.admin_service import AdminApplicationService
 from app.application.notification_service import NotificationService
 from app.application.admin_send_capability import AdminSendCapabilityGuard
 from app.core.settings_admin import AdminSettings, admin_settings
+from app.core.environment import LOCAL_MAX_SELECTED_RECIPIENTS
 from app.db.admin_notification_repository import SqlAlchemyAdminNotificationRepository
 from app.db.engine import get_engine
 from app.services.http_client import get_client
@@ -102,6 +103,7 @@ def build_production_admin_application(
         require_scoped_queue=True,
         persist_line_subjects=False,
         reservation_guard=AdminSendCapabilityGuard(client=boundary.client, scope_resolver=scope_resolver),
+        selected_recipient_limit=LOCAL_MAX_SELECTED_RECIPIENTS if runtime_settings.app_env == "local" else None,
     )
     application = AdminApplicationService(
         notification_service=notifications,

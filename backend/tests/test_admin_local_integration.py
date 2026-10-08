@@ -28,7 +28,7 @@ from app.db.engine import set_engine
 from app.main_admin import create_admin_app
 from app.runtime.admin_local_integration import (
     LocalIntegrationAdminComposition,
-    build_local_integration_admin_composition,
+    build_admin_composition,
 )
 from app.testing.fakes.external_business import FakeExternalBusinessGateway
 from app.testing.local_integration import build_local_integration_external_business
@@ -37,7 +37,8 @@ from app.domain.errors.errors import ExternalBusinessNotConfiguredError
 from app.domain.ports.organization_service_scope import (
     OrganizationServiceScopeNotConfiguredError,
 )
-from app.adapter.staff_auth import DemoStaffAuthenticator
+from app.domain.models.staff import AuthenticatedStaff
+from app.domain.enums.enums import StaffRole
 
 
 @pytest.fixture(autouse=True)
@@ -52,14 +53,13 @@ def _settings(*, environment="local", enabled=True, scopes=None):
         _env_file=None,
         database_url="postgresql+asyncpg://unused/unused",
         app_env=environment,
-        admin_local_integration_mode=enabled,
         admin_notification_runner_service_ids="service-a,service-b" if enabled else "",
-        admin_local_integration_scopes=(
+        admin_internal_api_scopes=(
             {"service-a": "organization-a", "service-b": "organization-b"}
             if scopes is None and enabled
             else scopes or {}
         ),
-        admin_line_internal_api_base_url="http://line.internal",
+        admin_line_internal_api_base_url="https://line.internal",
         admin_line_internal_api_bearer_token=SecretStr("test-only"),
         current_db_business_centers={"organization-a": "center-a", "organization-b": "center-b"},
     )
@@ -140,8 +140,9 @@ def test_local_integration_uses_phase4_persistent_http_composition():
             lambda request: httpx.Response(202, json={"status": "accepted"})
         )
     )
-    composition = build_local_integration_admin_composition(
+    composition = build_admin_composition(
         runtime_settings=_settings(),
+        scopes=_settings().admin_internal_api_scopes, runner_service_ids=_settings().notification_runner_service_ids,
         engine=object(),
         client=client,
         external_business=external,
@@ -160,8 +161,9 @@ def test_local_integration_uses_phase4_persistent_http_composition():
 
 
 def test_default_local_integration_builds_current_db_without_fake():
-    composition = build_local_integration_admin_composition(
+    composition = build_admin_composition(
         runtime_settings=_settings(),
+        scopes=_settings().admin_internal_api_scopes, runner_service_ids=_settings().notification_runner_service_ids,
         engine=object(),
         client=httpx.AsyncClient(
             transport=httpx.MockTransport(
@@ -178,8 +180,9 @@ def test_default_local_integration_builds_current_db_without_fake():
 def test_default_local_integration_missing_centers_fails_without_fixture_fallback():
     settings = _settings().model_copy(update={"current_db_business_centers": {}})
     with pytest.raises(ExternalBusinessNotConfiguredError):
-        build_local_integration_admin_composition(
-            runtime_settings=settings, engine=object(), client=object(),
+        build_admin_composition(
+            runtime_settings=settings, scopes=settings.admin_internal_api_scopes,
+            runner_service_ids=settings.notification_runner_service_ids, engine=object(), client=object(),
         )
 
 
@@ -194,11 +197,11 @@ def test_admin_app_switches_dependency_only_when_integration_is_enabled(monkeypa
         scope_resolver=SimpleNamespace(),
     )
     monkeypatch.setattr(
-        "app.runtime.admin_local_integration.build_local_integration_admin_composition",
+        "app.runtime.admin_local_integration.build_admin_composition",
         lambda **kwargs: sentinel,
     )
     app = create_admin_app(_settings())
-    assert app.state.admin_local_integration is sentinel
+    assert app.state.admin_runtime_composition is sentinel
     provider = app.dependency_overrides[get_admin_application_service]
     assert len(inspect.signature(provider).parameters) == 0
     assert provider() is application
@@ -224,13 +227,15 @@ async def test_local_integration_jobs_resolves_application_provider_via_asgi(mon
         scope_resolver=SimpleNamespace(),
     )
     monkeypatch.setattr(
-        "app.runtime.admin_local_integration.build_local_integration_admin_composition",
+        "app.runtime.admin_local_integration.build_admin_composition",
         lambda **kwargs: sentinel,
     )
     app = create_admin_app(_settings())
-    app.dependency_overrides[get_staff_authenticator_http] = (
-        lambda: DemoStaffAuthenticator(service_id="service-a")
-    )
+    class OfflineStaff:
+        async def get_current_staff(self):
+            return AuthenticatedStaff(staff_id="offline-staff", display_name="Offline",
+                                      role=StaffRole.ADMIN, service_id="service-a", active=True)
+    app.dependency_overrides[get_staff_authenticator_http] = OfflineStaff
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get(
@@ -242,26 +247,17 @@ async def test_local_integration_jobs_resolves_application_provider_via_asgi(mon
     assert application.calls == ["service-a"]
 
 
-@pytest.mark.parametrize("environment", ["staging", "production"])
-def test_nonlocal_environment_rejects_local_integration(environment):
-    with pytest.raises(ValidationError, match="requires APP_ENV=local"):
+@pytest.mark.parametrize("environment", ["staging", "development", "demo", "test", "unknown", ""])
+def test_unsupported_environment_rejected(environment):
+    with pytest.raises(ValueError, match="APP_ENV"):
         _settings(environment=environment)
 
 
-def test_composition_rejects_disabled_flag():
-    with pytest.raises(RuntimeError, match="not enabled"):
-        build_local_integration_admin_composition(
-            runtime_settings=_settings(enabled=False),
-            engine=object(),
-            client=object(),
-            external_business=object(),
-            queue=object(),
-        )
-
-
-def test_integration_settings_require_at_least_one_scope():
-    with pytest.raises(ValidationError, match="requires configured scopes"):
-        _settings(scopes={})
+def test_composition_requires_runner_and_canonical_scope():
+    for scopes, runners in [({}, ("service-a",)), ({"service-a":"organization-a"}, ()), ({"service-a":"organization-a"}, ("other",))]:
+        with pytest.raises(RuntimeError, match="scope"):
+            build_admin_composition(runtime_settings=_settings(), scopes=scopes,
+                                    runner_service_ids=runners, engine=object(), client=object())
 
 
 def test_scope_resolver_supports_two_scopes_and_fails_closed():
@@ -296,10 +292,11 @@ def test_scope_resolver_rejects_missing_or_noncanonical_identifiers(mapping):
 
 @pytest.mark.asyncio
 async def test_two_services_use_isolated_external_business_organizations():
-    composition = build_local_integration_admin_composition(
+    composition = build_admin_composition(
         runtime_settings=_settings(),
+        scopes=_settings().admin_internal_api_scopes, runner_service_ids=_settings().notification_runner_service_ids,
         external_business=build_local_integration_external_business(
-            ConfiguredOrganizationServiceScopeResolver(_settings().admin_local_integration_scopes).scopes
+            ConfiguredOrganizationServiceScopeResolver(_settings().admin_internal_api_scopes).scopes
         ),
         engine=object(),
         client=httpx.AsyncClient(
@@ -360,8 +357,9 @@ def test_outbox_commands_preserve_each_scope_without_crossing():
 async def test_same_runtime_dispatches_two_persisted_services_without_cross_scope(
     monkeypatch,
 ):
-    composition = build_local_integration_admin_composition(
+    composition = build_admin_composition(
         runtime_settings=_settings(),
+        scopes=_settings().admin_internal_api_scopes, runner_service_ids=_settings().notification_runner_service_ids,
         engine=object(),
         client=httpx.AsyncClient(
             transport=httpx.MockTransport(

@@ -93,7 +93,7 @@ LINEのnew attemptはrecipientと順序付きmessagesのsnapshotを保存し、c
 Legacy NULL / 不正snapshotは現在設定から再生成せず、provider callなしでUNKNOWNへ収束する。
 このためadditiveでも旧新版の混在は安全とみなさず、旧worker停止 → migration → 新runtimeの順序を維持する。
 
-Scriptはowner Settingsをimportするため、実行時はprocess env / owner dotenvから実DB設定を読む。
+Scriptはowner Settingsをimportするため、実行時はprocess envから実DB設定を読む。APP_ENV=localを明示した場合のみowner dotenvも使用可能。productionはdotenvを読まない。
 本Sliceではscriptを実行せず、helperをtest-only DBで検証する。実行時は`engine.begin()`のtransaction内で処理し、finallyでengineをdisposeする。
 失敗は握り潰さず非zero終了し、成功時だけtable名を出力する。DDL識別子は固定でuser inputを埋め込まない。
 NOTE: CLIは未処理例外のtracebackをsanitizeする境界を持たない。設定validation / driver例外に機密が含まれない保証はないため、
@@ -152,12 +152,12 @@ DBのText型にはrole enumやUUIDの検証機能はない。既存値の型・�
 | Admin Backend | `DATABASE_URL`, `APP_ENV`, `ADMIN_INTERNAL_API_BEARER_TOKEN`, `ADMIN_INTERNAL_API_SCOPES`, `CURRENT_DB_BUSINESS_CENTERS`, `ADMIN_NOTIFICATION_RUNNER_SERVICE_IDS`, `ADMIN_LINE_INTERNAL_API_BASE_URL`, `ADMIN_LINE_INTERNAL_API_BEARER_TOKEN`, `ADMIN_CORS_ALLOWED_ORIGINS` |
 | Staff OIDC | `ADMIN_OIDC_ENABLED`, `ADMIN_OIDC_ISSUER`, `ADMIN_OIDC_AUDIENCE`, `ADMIN_OIDC_JWKS_URL`, `ADMIN_OIDC_ALGORITHMS`（`RS256`を空値で上書きしない） |
 | LINE Backend | `DATABASE_URL`, `APP_ENV`, `LINE_INTERNAL_API_BEARER_TOKEN`, `LINE_ADMIN_INTERNAL_API_BASE_URL`, `LINE_ADMIN_INTERNAL_API_BEARER_TOKEN`, `LINE_ADMIN_SERVICE_SCOPES`, `LINE_LOGIN_CHANNEL_ID`, `LINE_COMMAND_MESSAGING_ACCESS_TOKENS`, `LINE_CANONICAL_LIFF_ENTRY_BASES`, `LINE_CORS_ALLOWED_ORIGINS` |
-| LINE staging safety | `ENABLE_STAGING_LINE_SEND`, `STAGING_LINE_ALLOWED_MEMBER_ID`, `STAGING_LINE_MAX_RECIPIENTS`, `STAGING_LINE_MESSAGE_PREFIX` |
+| LINE local safety | LINE repositoryの最新local templateを参照。APP_ENV=localとLOCAL_LINE_MAX_RECIPIENTS等を人間が確認 |
 
-- [ ] Admin `APP_ENV=production`でStaff OIDCを有効化する。非productionは既存Demo authであり、stagingという名前だけでStaff保護済みと判断しない。
-- [ ] 限定送信baselineでAdmin OIDCとstaging送信を同時確認する場合、Admin Backend / Frontendはproduction、LINE Backend / Frontendはstagingというunit別の選択を明示する。各Frontend内のbuild / runtime `APP_ENV`は一致させる。
-- [ ] Admin local integrationはlocal専用。配備経路は`ADMIN_LOCAL_INTEGRATION_MODE=false`、明示runner ownershipを持つcanonical compositionを使用。
-- [ ] LINEはproductionでproduction sender、stagingでstaging-safe sender、その他でdisabled sender。Capabilityは同じ設定を参照し、専用の別envはない。
+- [ ] Adminはlocal / production両方でStaff OIDCを必須とする。Demo認証へのfallbackはない。
+- [ ] local統合確認はAdmin / LINEともAPP_ENV=local。productionは両者APP_ENV=production。Frontendのbuild / runtime設定を一致させる。
+- [ ] 旧ADMIN_LOCAL_INTEGRATION_MODE / SCOPESは廃止。ADMIN_INTERNAL_API_SCOPESと明示runner ownershipへ統一する。
+- [ ] LINEはproduction sender / local安全senderを使う。staging_liveはlocal安全送信の互換wire labelでありruntime環境名ではない。
 - [ ] ProductionのS2S URLはHTTPS。SecretやDB接続情報はBackendにのみ供給し、Frontend buildへ渡さない。
 
 ### S2S credentialとscope
@@ -188,7 +188,7 @@ DBのText型にはrole enumやUUIDの検証機能はない。既存値の型・�
 
 ### LINEを先に起動
 
-- [ ] Migration合格、DB、APP_ENV、incoming bearer、Admin URL / bearer / scopes、Login channel、Messaging map、deep link、staging safetyを確認済みにする。
+- [ ] Migration合格、DB、APP_ENV、incoming bearer、Admin URL / bearer / scopes、Login channel、Messaging map、deep link、local safetyを確認済みにする。
 - [ ] [main_line.py](../../silver-line-repo/backend/app/main_line.py)のruntimeは[app_factory.py](../../silver-line-repo/backend/app/app_factory.py)のlifespan startupでrecovery runnerを開始し、shutdownでcancel / awaitする。起動直後から既存commandを処理し得る。
 - [ ] 起動後の`/health`、runner、Internal API / capabilityは§7で確認。Canonical linkage / LINE Login / Admin接続はAdmin起動後に確認し、それまで業務公開しない。
 
@@ -300,3 +300,15 @@ Current DB baselineのManual Gate合格まではExternal Business production PR�
 詳細は[Phase 5 verification](PHASE5_END_VERIFICATION.md)、[Admin recovery](PHASE5_SLICE53_STATE_RECOVERY.md)、[LINE recovery](../../silver-line-repo/docs/LINE_COMMAND_RECOVERY.md)、[canonical linkage](../../silver-line-repo/docs/CANONICAL_MEMBER_LINKAGE.md)を参照。
 これら過去文書のPhase番号は当時のロードマップのもの。旧send-mode表示やFrontend未対応という履歴記述より、現在sourceと本RunbookのPhase 1 / Slice 2.1–2.2 contractを優先する。
 Cross-repositoryリンクは両repositoryを同じ親directoryへ置く前提。本Sliceは文書作成のみで、実配備・実接続・migration・Phase 3着手を実施していない。
+
+## Admin二環境化の配備境界
+
+APP_ENVはprocess envでlocal / productionを明示し、旧値・未設定を拒否する。productionはCloud process env / Secretのみで、repositoryの.env.adminを読み込まない。DB/OIDC/LINE URL・Bearer/canonical scopes/runner ownershipの不足はstartupで拒否する。外部業務APIが未設定ならCurrent DBを使い、Fakeへfallbackしない。
+
+Frontendはnpm run build / npm startのlauncher経由とする（VercelのBuild Commandもnpm run build）。Next標準dotenvはtarget directoryに配置せず、読込み前に検査で拒否する。NEXT_PUBLIC_ADMIN_API_BASE_URLは非空必須、空をsame-originとは扱わない。NEXT_PUBLIC_GOOGLE_CLIENT_IDも必須。公開envはbuild-time固定であり、runtime変更でretargetできない。APP_ENV/公開設定をbuildとstartで揃え、変更時は再buildする。Backend secretをbuild args / NEXT_PUBLICへ渡さない。
+
+local標準はFrontend 3001、Backend 8082、Python 3.12 / Windows SelectorEventLoop。実Google Staff Login、開発DB、Current DB、https://silver-backend.ngrok.app経由のLocal LINEを使う。Admin用ngrokは必須ではなく、LINE -> Admin逆方向の外部到達性が必要な場合だけ人間が準備する。localhostと127.0.0.1は別originとしてGoogle/CORS登録する。
+
+localはselected 10人まで。11 selected / 10 sendableもBackendがDelivery/Outbox生成前に拒否する。productionには固定上限を適用しない。LINE ready/capability上限は両環境で維持する。staging_live、旧staging-readiness、送信Internal API contractは変更しない。
+
+Manual Gate: 人間による実env、Google Origin、Staff identity/permission、開発DB・未完了Operation確認、Admin/LINE/Frontend起動、Google Login、1人/複数人/10人/11人境界、sender icon表示、production DB/LINE URLと双方向credentialの環境対応、Cloud env/Secret設定、deployment。runnerは未完了送信を再開するため、起動前に接続DBと所有scopeを確認する。

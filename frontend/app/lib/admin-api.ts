@@ -7,7 +7,7 @@ export type DeliveryStatus = "pending" | "sent" | "failed" | "unknown" | "skippe
 
 export interface AdminJobSummary { job_id: string; title: string; location: string | null; status: JobStatus; openings: number; version: string; summary: string | null; work_days?: string | null; work_time?: string | null }
 export interface AdminJobDetail { job_id: string; title: string; description: string; location: string | null; conditions: string[]; status: JobStatus; openings: number; version: string; job_url: string; contact: string | null }
-export interface AdminCandidate { member_id: string; display_name: string; line_linked: boolean; eligible: boolean; reason: string | null; selected: boolean; preference_summary?: string | null }
+export interface AdminCandidate { member_id: string; member_number?: string | null; display_name: string; line_linked: boolean; eligible: boolean; reason: string | null; selected: boolean; preference_summary?: string | null }
 export interface AdminMessage { greeting: string; introduction: string; note: string }
 export interface AdminOperation { operation_id: string; job_id: string; job_version: string | null; notification_type: NotificationType; message: AdminMessage; status: OperationStatus; target_count: number; selected_count: number; validated_at: string | null; send_requested_at: string | null; completed_at: string | null; created_at: string; updated_at: string }
 export interface AdminValidation { operation_id: string; status: OperationStatus; can_proceed: boolean; selected_count: number; sendable_count: number; skipped_count: number; reasons: string[]; version_changed: boolean; external_system_blocked: boolean }
@@ -79,12 +79,12 @@ export function adminErrorMessage(error: unknown): string {
   if (!(error instanceof AdminApiError)) return "処理に失敗しました。もう一度お試しください。";
   if (error.code === "api_not_configured") return "Backend URLが設定されていません。ローカル環境の設定を確認してください。";
   if (error.code === "external_system_unavailable") return "求人・候補情報を確認できませんでした。しばらくして再確認してください。";
-  if (error.code === "staff_auth_unavailable") return "デモ用スタッフ情報を取得できませんでした。";
+  if (error.code === "staff_auth_unavailable") return "スタッフ認証を確認できませんでした。";
   if (error.status === 401) return "認証が必要です。ログイン状態を確認してください。";
   if (error.status === 403) return "この操作を行う権限、またはサービス利用権限がありません。";
   if (error.status === 404) return "対象が見つかりません。求人一覧から選び直してください。";
   if (error.status === 409) return "状態が変更されています。最新状態を再確認してください。";
   if (error.status === 422) return "入力内容を確認してください。";
-  if (error.status === 503 || error.status === 0) return "デモ用Backendを一時的に利用できません。しばらくして再試行してください。";
+  if (error.status === 503 || error.status === 0) return "Admin Backendを一時的に利用できません。しばらくして再試行してください。";
   return "処理に失敗しました。もう一度お試しください。";
 }

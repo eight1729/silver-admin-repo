@@ -7,15 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
+from app.core.jobs_diagnostics import jobs_failure
 from app.db.engine import dispose_engine
 from app.services.http_client import aclose_client
 
 
 @asynccontextmanager
 async def shared_lifespan(app: FastAPI):
-    runner = getattr(getattr(app, "state", None), "admin_local_integration", None)
-    if runner is None:
-        runner = getattr(getattr(app, "state", None), "admin_runtime_composition", None)
+    runner = getattr(getattr(app, "state", None), "admin_runtime_composition", None)
     runner = getattr(getattr(runner, "boundary", None), "runner", None)
     try:
         if runner is not None:
@@ -52,6 +51,8 @@ def configure_shared_infrastructure(
 
     @app.exception_handler(OperationalError)
     async def db_unavailable(request: Request, exc: OperationalError):
+        if request.method == "GET" and request.url.path == "/admin/jobs":
+            jobs_failure("admin_jobs_http", "jobs_db_unavailable", exc)
         return JSONResponse(
             content={"detail": {"error": "database_unavailable"}},
             status_code=503,
@@ -59,6 +60,8 @@ def configure_shared_infrastructure(
 
     @app.exception_handler(SQLAlchemyError)
     async def db_error(request: Request, exc: SQLAlchemyError):
+        if request.method == "GET" and request.url.path == "/admin/jobs":
+            jobs_failure("admin_jobs_http", "jobs_internal_error", exc)
         return JSONResponse(
             content={"detail": {"error": "internal_error"}},
             status_code=500,

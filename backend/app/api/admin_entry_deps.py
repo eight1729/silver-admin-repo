@@ -1,6 +1,7 @@
 """Admin entrypoint dependency without importing legacy LINE implementations."""
 
 from fastapi import HTTPException
+from app.core.environment import LOCAL_MAX_SELECTED_RECIPIENTS
 
 
 def get_admin_application_service():
@@ -37,5 +38,7 @@ async def get_admin_line_send_mode_for_runtime(
     except Exception:
         return get_admin_line_send_mode()
     result = capability.model_dump()
+    if getattr(runtime_settings, "app_env", None) == "local":
+        result["max_recipients"] = min(LOCAL_MAX_SELECTED_RECIPIENTS, capability.max_recipients or LOCAL_MAX_SELECTED_RECIPIENTS)
     result["ready"] = capability.ready and capability.live_send_enabled and not capability.blocking_reasons and capability.mode != "disabled"
     return result

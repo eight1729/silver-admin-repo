@@ -71,7 +71,7 @@ async def test_cross_repo_stale_admin_to_recovered_line_terminal(db):
     script = r'''
 import os, sys, asyncio
 os.environ['DATABASE_URL']='postgresql://unused/unused'
-os.environ['APP_ENV']='test'
+os.environ['APP_ENV']='local'
 from pydantic_settings import DotEnvSettingsSource
 DotEnvSettingsSource._read_env_files=lambda self: {}
 sys.path.insert(0, 'tests')

@@ -1,3 +1,5 @@
+from app.core.jobs_diagnostics import jobs_point, jobs_failure
+
 from collections import Counter
 from uuid import UUID, uuid4
 
@@ -65,7 +67,7 @@ async def get_line_send_mode(
     fallback_mode: dict = Depends(get_admin_line_send_mode_provider),
 ):
     runtime_settings = getattr(request.app.state, "admin_runtime_settings", None)
-    integration = getattr(request.app.state, "admin_runtime_composition", None) or getattr(request.app.state, "admin_local_integration", None)
+    integration = getattr(request.app.state, "admin_runtime_composition", None)
     if integration is None:
         return fallback_mode
     return await get_admin_line_send_mode_for_runtime(
@@ -133,9 +135,12 @@ async def list_jobs(
     staff: AuthenticatedStaff = Depends(require_admin_viewer),
     service: AdminApplicationService = Depends(get_admin_application_service),
 ):
+    jobs_point("admin_jobs_route", "list_jobs_start")
+    stage = "list_jobs_application"
     try:
         jobs = await service.list_jobs(staff.service_id)
-        return tuple(
+        stage = "list_jobs_response"
+        response = tuple(
             AdminJobSummaryResponse(
                 job_id=item.external_job_id,
                 title=item.title,
@@ -148,7 +153,10 @@ async def list_jobs(
             )
             for item in jobs
         )
+        jobs_point("admin_jobs_route", "list_jobs_complete")
+        return response
     except Exception as exc:
+        jobs_failure("admin_jobs_route", stage, exc)
         _translate(exc)
 
 
@@ -207,6 +215,7 @@ async def list_candidates(
         return tuple(
             AdminCandidateResponse(
                 member_id=item.member_id,
+                member_number=item.member_number,
                 display_name=item.display_name,
                 line_linked=item.line_linked,
                 eligible=item.eligible,

@@ -347,7 +347,7 @@ async def test_canonical_factory_never_falls_back_to_local_fake(db, monkeypatch,
     from pydantic_settings import DotEnvSettingsSource
     monkeypatch.setattr(DotEnvSettingsSource, "_read_env_files", lambda self: {})
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused/unused")
-    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("APP_ENV", "local")
     from app.core.settings_admin import AdminSettings
     from app.main_admin import create_admin_app
     from app.runtime import admin_local_integration
@@ -355,7 +355,7 @@ async def test_canonical_factory_never_falls_back_to_local_fake(db, monkeypatch,
     # A sentinel would fail if the Internal API still used composition's Fake.
     local_provider = object()
     monkeypatch.setattr(
-        admin_local_integration, "build_local_integration_admin_composition",
+        admin_local_integration, "build_admin_composition",
         lambda **kwargs: SimpleNamespace(application=object(), external_business=local_provider),
     )
     settings = AdminSettings(
@@ -364,8 +364,7 @@ async def test_canonical_factory_never_falls_back_to_local_fake(db, monkeypatch,
         admin_internal_api_bearer_token=SecretStr("test-incoming"),
         admin_internal_api_scopes={"service-a": "org-a"},
         current_db_business_centers={"org-a": "center-a"},
-        admin_local_integration_mode=local_integration,
-        admin_local_integration_scopes={"service-a": "org-a"} if local_integration else {},
+        admin_notification_runner_service_ids="service-a",
     )
     monkeypatch.setattr(admin_internal_deps, "get_engine", lambda: db[1])
     app = create_admin_app(settings)

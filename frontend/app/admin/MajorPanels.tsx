@@ -1,3 +1,4 @@
+import { orderCandidates } from "./candidate-order";
 import { canAttemptSend, isLiveMode, modePresentation, safetyPrefix, sendWarning } from "./send-capability";
 import { useEffect, useRef, useState } from "react";
 import type {
@@ -77,7 +78,7 @@ export function CandidateSelectionPanel({ job, candidates, selected, notificatio
   const [page, setPage] = useState(1);
   useEffect(() => { setFilter("all"); setPage(1); }, [job.job_id, setFilter]);
   useEffect(() => setPage(1), [filter]);
-  const visibleCandidates = filterCandidates(candidates, filter);
+  const visibleCandidates = filterCandidates(orderCandidates(candidates), filter);
   const totalPages = Math.max(1, Math.ceil(visibleCandidates.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageCandidates = visibleCandidates.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -95,7 +96,7 @@ export function CandidateSelectionPanel({ job, candidates, selected, notificatio
         const disabled = !editable || (!candidate.eligible && !isSelected) || limitReached || busy;
         return <tr className={`${isSelected ? "is-selected" : ""}${disabled && !isSelected ? " is-disabled" : ""}`} key={candidate.member_id} onClick={() => { if (!disabled) toggle(candidate.member_id); }}>
           <td><input type="checkbox" name="admin-selected-candidate" checked={isSelected} disabled={disabled} aria-label={`${candidate.display_name}を選択`} aria-describedby={`candidate-state-${candidate.member_id}`} onClick={(event) => event.stopPropagation()} onChange={() => { if (!disabled) toggle(candidate.member_id); }}/></td>
-          <th scope="row">{candidate.member_id}</th><td>{candidate.display_name || "—"}</td><td><span className="candidate-preference-clamp">{candidate.preference_summary || "—"}</span></td><td><span className={`candidate-state-badge ${candidate.line_linked ? "is-positive" : "is-neutral"}`}>{candidate.line_linked ? "連携済み" : "未連携"}</span></td><td><span id={`candidate-state-${candidate.member_id}`} className={`candidate-state-badge ${candidate.eligible ? "is-positive" : "is-negative"}`}>{candidate.eligible ? "通知可能" : "通知不可"}</span>{candidate.reason && <span className="sr-only">{safeReasonLabel(candidate.reason)}</span>}{limitReached && <span className="sr-only">選択上限に達しています</span>}</td>
+          <th scope="row">{candidate.member_number ?? candidate.member_id}</th><td>{candidate.display_name || "—"}</td><td><span className="candidate-preference-clamp">{candidate.preference_summary || "—"}</span></td><td><span className={`candidate-state-badge ${candidate.line_linked ? "is-positive" : "is-neutral"}`}>{candidate.line_linked ? "連携済み" : "未連携"}</span></td><td><span id={`candidate-state-${candidate.member_id}`} className={`candidate-state-badge ${candidate.eligible ? "is-positive" : "is-negative"}`}>{candidate.eligible ? "通知可能" : "通知不可"}</span>{candidate.reason && <span className="sr-only">{safeReasonLabel(candidate.reason)}</span>}{limitReached && <span className="sr-only">選択上限に達しています</span>}</td>
         </tr>;
       })}
     </tbody></table></div>}

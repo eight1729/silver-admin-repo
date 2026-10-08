@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
-  isStagingEnvironment,
+  normalizedAppEnvironment, environmentLabel,
 } from "../lib/environment-policy.ts";
 import {
   blockingReasonMessages,
@@ -11,19 +11,23 @@ import {
   getBlockingReasonMessage,
 } from "./blocking-reasons.ts";
 
-test("staging environment detection normalizes the value", () => {
-  assert.equal(isStagingEnvironment(" staging "), true);
-  assert.equal(isStagingEnvironment("demo"), false);
+test("only explicit local and production environments are accepted", () => {
+  assert.equal(normalizedAppEnvironment(" LOCAL "), "local");
+  assert.equal(environmentLabel("local"), "ローカル開発環境");
+  assert.equal(environmentLabel("production"), "本番環境");
+  for (const value of [undefined, "", "staging", "development", "demo", "test", "unknown"]) {
+    assert.throws(() => normalizedAppEnvironment(value), /APP_ENV/);
+  }
 });
 
 test("staging uses verification copy", async () => {
   const layout = await readFile(new URL("./layout.tsx", import.meta.url), "utf8");
-  assert.match(layout, /準本番検証環境/);
+  assert.match(layout, /environmentLabel\(process.env.APP_ENV\)/);
   assert.match(layout, /現在のLINE送信モードと送信可否を画面内で確認/);
   assert.match(layout, /送信時にはBackendでも再検証/);
   assert.doesNotMatch(layout, /業務データはモックです|現在は実LINE通知を送信しません|Backend再起動で一時データが初期化されます/);
   assert.doesNotMatch(layout, /admin-legacy-header|STAGING VERIFICATION|LOCAL DEMO/);
-  assert.match(layout, /ローカルデモ環境/);
+  assert.doesNotMatch(layout, /ローカルデモ環境|準本番検証環境/);
 });
 
 test("Admin client uses owner-specific API configuration", async () => {

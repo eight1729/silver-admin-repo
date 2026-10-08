@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev targets/admin",
-    "build": "next build targets/admin",
-    "start": "next start targets/admin",
-    "lint": "next lint targets/admin",
+    "dev": "node config/run-next.js dev",
+    "build": "node config/run-next.js build",
+    "start": "node config/run-next.js start",
+    "lint": "node config/run-next.js lint",
     "typecheck": "tsc --noEmit",
-    "test": "node --test app/admin/*.test.ts",
+    "test": "node --experimental-strip-types --test app/admin/*.test.ts",
     "test:config": "node --test config/load-target-env.test.js"
   },
   "dependencies": {

@@ -22,6 +22,7 @@ function browser(saved?: string) {
   let timerId = 0;
   let cookie = "";
   let status = 200;
+  let requestBody: string | undefined;
   let requestHeaders: Record<string, string> = {};
   let options: any;
   let rendered = 0;
@@ -45,6 +46,7 @@ function browser(saved?: string) {
     process: { env: { NEXT_PUBLIC_ADMIN_API_BASE_URL: "https://admin-api.example.test", NEXT_PUBLIC_ADMIN_SERVICE_ID: "service-a" } },
     dispatchEvent: events.dispatchEvent.bind(events),
     fetch: async (_url: string, init: RequestInit) => {
+      requestBody = init.body as string | undefined;
       requestHeaders = init.headers as Record<string, string>;
       return { ok: status === 200, status, json: async () => status === 200 ? [] : { detail: { error: "denied" } } };
     },
@@ -67,6 +69,7 @@ function browser(saved?: string) {
     auth, api, storage, document, window, context, load,
     get options() { return options; }, get rendered() { return rendered; }, get disabled() { return disabled; },
     get headers() { return requestHeaders; },
+    get body() { return requestBody; },
     respond: (value: number) => { status = value; },
     expire: () => { clock += 61_000; [...timers.values()].forEach((callback) => callback()); },
   };
@@ -179,9 +182,9 @@ test("API 403 preserves the credential and reports forbidden without granting pe
   assert.equal(b.storage.get(key), credential());
 });
 
-test("production middleware routes to login until the GIS flow sets the UI hint", () => {
+for (const environment of ["local", "production"]) test(`${environment} middleware routes to login until GIS sets the UI hint`, () => {
   const b = browser();
-  vm.runInContext('process.env.APP_ENV = "production"', b.context);
+  vm.runInContext(`process.env.APP_ENV = "${environment}"`, b.context);
   const { middleware } = b.load(resolve(here, "../../targets/admin/middleware.ts"));
   const request = (path: string, hint?: string) => ({
     nextUrl: { pathname: path, clone: () => new URL(`https://admin.example.test${path}`) },
@@ -205,7 +208,15 @@ test("production UI mounts login before protected children; forbidden and logout
   assert.match(boundary, /この画面を利用する権限がありません/);
   assert.match(boundary, /logoutStaff\(\); window.location.replace\("\/auth-required"\)/);
   const layout = readFileSync(resolve(here, "layout.tsx"), "utf8");
-  assert.match(layout, /APP_ENV === "production"/);
+  assert.match(layout, /<AdminAuthBoundary>/);
   const login = readFileSync(resolve(here, "StaffLogin.tsx"), "utf8");
   assert.match(login, /if \(accepted\) window.location.replace\("\/"\)/);
+});
+
+
+test("target payload retains UUID selection instead of display member number", async () => {
+  const b = browser();
+  const candidate = { member_id: "144813ad-bed4-4330-b592-0e6aebcfd1bc", member_number: "0001" };
+  await b.api.updateTargets("operation", [candidate.member_id, candidate.member_id]);
+  assert.deepEqual(JSON.parse(b.body!), { selected_member_ids: [candidate.member_id] });
 });

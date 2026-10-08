@@ -7,7 +7,7 @@ from app.core.settings_admin import AdminSettings
 from app.main_admin import create_admin_app
 
 
-@pytest.mark.parametrize("environment", ["local", "development", "demo", "test", "staging", "production"])
+@pytest.mark.parametrize("environment", ["local", "production"])
 def test_internal_entrypoint_selects_current_db_in_every_environment(monkeypatch, environment):
     engine = object()
     monkeypatch.setattr("app.api.admin_internal_deps.get_engine", lambda: engine)
