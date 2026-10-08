@@ -1,10 +1,12 @@
 const assert = require("node:assert/strict");
+const path = require("node:path");
 const test = require("node:test");
 
 const { loadTargetEnv, targetEnvPath } = require("./load-target-env");
 
 test("Admin target resolves only the repository-local Admin env path", () => {
-  assert.match(targetEnvPath("admin"), /silver-admin-repo[\\/].env.admin$/);
+  const repositoryRoot = path.resolve(__dirname, "../..");
+  assert.equal(targetEnvPath("admin"), path.join(repositoryRoot, ".env.admin"));
   assert.throws(() => targetEnvPath("line"), /unsupported frontend target/);
 });
 
