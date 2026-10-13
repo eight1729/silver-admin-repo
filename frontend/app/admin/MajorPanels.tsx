@@ -1,3 +1,5 @@
+import { JobDateFilter } from "./JobDateFilter";
+import { filterRegisteredJobs, formatJobRegistration } from "./job-registration";
 import { orderCandidates } from "./candidate-order";
 import { canAttemptSend, isLiveMode, modePresentation, safetyPrefix, sendWarning } from "./send-capability";
 import { useEffect, useRef, useState } from "react";
@@ -42,20 +44,26 @@ export function JobSelectionPanel({ jobs, selectedJobId, selectedJob, loading, e
   retry: () => void;
   select: (id: string) => Promise<void>;
 }) {
+  const [registeredFrom, setRegisteredFrom] = useState("");
+  const visibleJobs = filterRegisteredJobs(jobs, registeredFrom);
   return <div className="major-panel-content">
+    <JobDateFilter value={registeredFrom} onChange={setRegisteredFrom} />
+    {selectedJobId && !loading && !error && !visibleJobs.some((item) => item.job_id === selectedJobId) && <p className="admin-info">選択中の求人「{selectedJob?.title ?? selectedJobId}」は表示条件の対象外です。選択は保持しています。</p>}
     {loading && <div className="admin-info" role="status">求人を読み込んでいます。</div>}
     {!loading && error && <div className="admin-error" role="alert"><p>求人一覧を取得できませんでした。</p><button className="admin-button secondary" type="button" onClick={retry}>求人一覧を再読み込み</button></div>}
-    {!loading && !error && jobs.length === 0 && <div className="admin-panel-empty">現在選択できる求人はありません。</div>}
-    {!loading && !error && jobs.length > 0 && <><div className="job-selection-table-wrapper"><table className="job-selection-table"><colgroup><col className="job-select-column"/><col className="job-name-column"/><col className="job-days-column"/><col className="job-time-column"/><col className="job-summary-column"/></colgroup><thead><tr><th scope="col"><span className="sr-only">選択</span></th><th scope="col">求人名</th><th scope="col">勤務日</th><th scope="col">勤務時間</th><th scope="col">概要</th></tr></thead><tbody>{jobs.map((item) => {
+    {!loading && !error && visibleJobs.length === 0 && <div className="admin-panel-empty">現在選択できる求人はありません。</div>}
+    {!loading && !error && visibleJobs.length > 0 && <><div className="job-selection-table-wrapper"><table className="job-selection-table"><colgroup><col className="job-select-column"/><col className="job-name-column"/><col className="job-days-column"/><col className="job-time-column"/><col className="job-summary-column"/></colgroup><thead><tr><th scope="col"><span className="sr-only">選択</span></th><th scope="col">求人名</th><th scope="col">勤務日</th><th scope="col">勤務時間</th><th scope="col">概要</th></tr></thead><tbody>{visibleJobs.map((item) => {
         const selected = item.job_id === selectedJobId;
         const selectable = item.status === "published";
         const disabled = busy || !selectable;
-        return <tr className={`${selected ? "is-selected" : ""}${!selectable ? " is-disabled" : ""}`} key={item.job_id} onClick={() => { if (!disabled && !selected) void select(item.job_id); }}><td><input type="radio" name="admin-selected-job" checked={selected} disabled={disabled} aria-label={`${item.title}を選択`} onClick={(event) => event.stopPropagation()} onChange={() => { if (!disabled && !selected) void select(item.job_id); }}/></td><th scope="row">{item.title}</th><td>{item.work_days || "—"}</td><td>{item.work_time || "—"}</td><td><span className="job-summary-clamp">{item.summary || "—"}</span></td></tr>;
+        return <tr className={`${selected ? "is-selected" : ""}${!selectable ? " is-disabled" : ""}`} key={item.job_id} onClick={() => { if (!disabled && !selected) void select(item.job_id); }}><td><input type="radio" name="admin-selected-job" checked={selected} disabled={disabled} aria-label={`${item.title}を選択`} onClick={(event) => event.stopPropagation()} onChange={() => { if (!disabled && !selected) void select(item.job_id); }}/></td><th scope="row">{item.title}<small className="job-registration-date">登録日: {formatJobRegistration(item.created_at)}</small></th><td>{item.work_days || "—"}</td><td>{item.work_time || "—"}</td><td><span className="job-summary-clamp">{item.summary || "—"}</span></td></tr>;
       })}</tbody></table></div><div className="job-list-link-row"><a className="admin-link" href="/admin/jobs">求人一覧へ <span aria-hidden="true">↗</span></a></div></>}
   </div>;
 }
 
-export function CandidateSelectionPanel({ job, candidates, selected, notificationType, notificationTypeLocked, setNotificationType, toggle, begin, busy, error, retry, targetsPending, maxRecipients, editable, filter, setFilter }: {
+export function CandidateSelectionPanel({ preserveOrder = false, submitLabel, job, candidates, selected, notificationType, notificationTypeLocked, setNotificationType, toggle, begin, busy, error, retry, targetsPending, maxRecipients, editable, filter, setFilter }: {
+  preserveOrder?: boolean;
+  submitLabel?: string;
   job: AdminJobDetail;
   candidates: AdminCandidate[];
   selected: Set<string>;
@@ -80,7 +88,7 @@ export function CandidateSelectionPanel({ job, candidates, selected, notificatio
   useEffect(() => { setFilter("all"); setMinimumMemberNumber(""); setPage(1); }, [job.job_id, setFilter]);
   useEffect(() => setPage(1), [filter, minimumMemberNumber]);
   const invalidMinimum = minimumMemberNumber !== "" && !isMemberNumber(minimumMemberNumber);
-  const visibleCandidates = filterCandidates(orderCandidates(candidates), filter, minimumMemberNumber);
+  const visibleCandidates = filterCandidates(preserveOrder ? candidates : orderCandidates(candidates), filter, minimumMemberNumber);
   const totalPages = Math.max(1, Math.ceil(visibleCandidates.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageCandidates = visibleCandidates.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -100,13 +108,13 @@ export function CandidateSelectionPanel({ job, candidates, selected, notificatio
         const disabled = !editable || (!candidate.eligible && !isSelected) || limitReached || busy;
         return <tr className={`${isSelected ? "is-selected" : ""}${disabled && !isSelected ? " is-disabled" : ""}`} key={candidate.member_id} onClick={() => { if (!disabled) toggle(candidate.member_id); }}>
           <td><input type="checkbox" name="admin-selected-candidate" checked={isSelected} disabled={disabled} aria-label={`${candidate.display_name}を選択`} aria-describedby={`candidate-state-${candidate.member_id}`} onClick={(event) => event.stopPropagation()} onChange={() => { if (!disabled) toggle(candidate.member_id); }}/></td>
-          <th scope="row">{candidate.member_number ?? candidate.member_id}</th><td>{candidate.display_name || "—"}</td><td><span className="candidate-preference-clamp">{candidate.preference_summary || "—"}</span></td><td><span className={`candidate-state-badge ${candidate.line_linked ? "is-positive" : "is-neutral"}`}>{candidate.line_linked ? "連携済み" : "未連携"}</span></td><td><span id={`candidate-state-${candidate.member_id}`} className={`candidate-state-badge ${candidate.eligible ? "is-positive" : "is-negative"}`}>{candidate.eligible ? "通知可能" : "通知不可"}</span>{candidate.reason && <span className="sr-only">{safeReasonLabel(candidate.reason)}</span>}{limitReached && <span className="sr-only">選択上限に達しています</span>}</td>
+          <th scope="row">{candidate.member_number ?? (preserveOrder ? "未取得" : candidate.member_id)}</th><td>{candidate.display_name || "—"}</td><td><span className="candidate-preference-clamp">{candidate.preference_summary || "—"}</span></td><td><span className={`candidate-state-badge ${candidate.line_linked ? "is-positive" : "is-neutral"}`}>{candidate.linkage_unknown ? "未確認" : candidate.line_linked ? "連携済み" : "未連携"}</span></td><td><span id={`candidate-state-${candidate.member_id}`} className={`candidate-state-badge ${candidate.eligible ? "is-positive" : "is-negative"}`}>{candidate.eligible ? "通知可能" : "通知不可"}</span>{candidate.reason && <span className="sr-only">{safeReasonLabel(candidate.reason)}</span>}{limitReached && <span className="sr-only">選択上限に達しています</span>}</td>
         </tr>;
       })}
     </tbody></table></div>}
     {visibleCandidates.length > 0 && <div className="candidate-pagination" aria-label="候補会員のページ切り替え"><span>{(currentPage - 1) * pageSize + 1}〜{Math.min(currentPage * pageSize, visibleCandidates.length)} / {visibleCandidates.length}件</span><div><button type="button" className="admin-button secondary compact" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>前へ</button>{Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => <button type="button" className={`candidate-page-button${pageNumber === currentPage ? " is-current" : ""}`} aria-current={pageNumber === currentPage ? "page" : undefined} onClick={() => setPage(pageNumber)} key={pageNumber}>{pageNumber}</button>)}<button type="button" className="admin-button secondary compact" disabled={currentPage === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>次へ</button></div></div>}
     <div className="candidate-list-link-row"><a className="admin-link" href={`/admin/members?jobId=${encodeURIComponent(job.job_id)}`}>会員一覧へ <span aria-hidden="true">↗</span></a></div>
-    {editable && <><div className="candidate-footer-actions"><label><span>通知種別</span><select value={notificationType} disabled={notificationTypeLocked || busy} onChange={(event) => { if (!notificationTypeLocked && !busy) setNotificationType(event.target.value as NotificationType); }}><option value="new_job_match">新着求人マッチ</option><option value="existing_job_match">既存求人マッチ</option><option value="custom_job">個別求人</option></select></label><button className="admin-button candidate-primary-compact" type="button" disabled={busy || selected.size === 0 || (maxRecipients != null && selected.size > maxRecipients) || job.status !== "published"} onClick={() => void begin()}>{busy ? "対象を保存中…" : targetsPending ? "対象会員の保存を再試行" : "対象を保存して通知文編集へ"}</button></div>
+    {editable && <><div className="candidate-footer-actions"><label><span>通知種別</span><select value={notificationType} disabled={notificationTypeLocked || busy} onChange={(event) => { if (!notificationTypeLocked && !busy) setNotificationType(event.target.value as NotificationType); }}><option value="new_job_match">新着求人マッチ</option><option value="existing_job_match">既存求人マッチ</option><option value="custom_job">個別求人</option></select></label><button className="admin-button candidate-primary-compact" type="button" disabled={busy || selected.size === 0 || (maxRecipients != null && selected.size > maxRecipients) || job.status !== "published"} onClick={() => void begin()}>{busy ? "対象を保存中…" : targetsPending ? "対象会員の保存を再試行" : submitLabel ?? "対象を保存して通知文編集へ"}</button></div>
       {targetsPending && <div className="admin-info" role="status">operationは作成済みです。対象会員の保存を再試行してください。</div>}
       {singleRecipient && <p className="candidate-limit-note" role="note">実LINE検証では1名だけ選択できます。選択済みの会員を解除すると別の会員を選べます。</p>}</>}
     {!editable && <p className="panel-guidance">対象を変更する場合は、送信前確認から「対象変更」を選択してください。</p>}

@@ -1,4 +1,5 @@
 from app.core.jobs_diagnostics import jobs_point, jobs_failure
+from app.application.automatic_selection import automatic_context
 
 from collections import Counter
 from uuid import UUID, uuid4
@@ -38,6 +39,7 @@ from app.domain.errors.errors import (
 from app.domain.models.staff import AuthenticatedStaff
 from app.schemas.admin import (
     AdminCandidateResponse,
+    AdminConfirmationResponse, AdminAutomaticSelectionResponse, AdminSendRequest, AdminValidationTargetResponse,
     AdminDeliveriesResponse,
     AdminDeliveryResponse,
     AdminDeliverySummary,
@@ -111,6 +113,8 @@ def _operation(result) -> AdminOperationResponse:
     operation = result.operation
     return AdminOperationResponse(
         operation_id=operation.operation_id,
+        automatic_selection=automatic_context(operation) is not None,
+        selected_member_ids=tuple(t.member_id for t in result.targets if t.selected),
         job_id=operation.job_id,
         job_version=operation.job_version,
         notification_type=operation.notification_type,
@@ -150,6 +154,7 @@ async def list_jobs(
                 summary=item.summary,
                 work_days=item.work_days,
                 work_time=item.work_time,
+                created_at=item.created_at,
             )
             for item in jobs
         )
@@ -178,6 +183,7 @@ async def get_job(
             version=item.version,
             job_url=item.job_url or "",
             contact=item.staff_notes,
+            created_at=item.created_at,
         )
     except Exception as exc:
         _translate(exc)
@@ -222,6 +228,7 @@ async def list_candidates(
                 reason=item.reason,
                 selected=item.selected,
                 preference_summary=item.preference_summary,
+                recommendation_level=item.recommendation_level,
             )
             for item in await service.list_candidates(staff.service_id, job_id)
         )
@@ -248,6 +255,7 @@ async def create_operation(
             greeting=body.greeting,
             introduction=body.introduction,
             note=body.note,
+            automatic_selection=body.automatic_selection,
         )
         return _operation(
             await service.get_operation(staff.service_id, operation.operation_id)
@@ -309,6 +317,7 @@ async def replace_targets(
                 service_id=staff.service_id,
                 operation_id=operation_id,
                 selected_member_ids=body.selected_member_ids,
+                reinclude_member_ids=body.reinclude_member_ids,
                 staff_id=staff.staff_id,
             )
         )
@@ -338,7 +347,13 @@ async def validate_operation(
         )
         if summary.blocking_reason:
             reasons = tuple(sorted(set(reasons) | {summary.blocking_reason}))
+        selected = tuple(t for t in (await service.get_operation(staff.service_id, operation_id)).targets if t.selected)
+        by_id = {i.member_id: i for i in summary.target_results if i.selected}
         return AdminValidationResponse(
+            target_results=tuple(AdminValidationTargetResponse(member_id=t.member_id,
+                disposition=by_id[t.member_id].delivery_disposition.value if t.member_id in by_id else "block",
+                reason=by_id[t.member_id].reason if t.member_id in by_id else summary.blocking_reason or "revalidation_required") for t in selected),
+            requires_staff_reconfirmation=summary.requires_staff_reconfirmation,
             operation_id=operation_id,
             status=operation.status,
             can_proceed=summary.can_proceed,
@@ -360,6 +375,7 @@ async def validate_operation(
 )
 async def send_operation(
     operation_id: UUID,
+    body: AdminSendRequest | None = None,
     staff: AuthenticatedStaff = Depends(require_admin_operator),
     service: AdminApplicationService = Depends(get_admin_application_service),
 ):
@@ -369,6 +385,7 @@ async def send_operation(
             operation_id=operation_id,
             staff_id=staff.staff_id,
             request_id=_request_id(),
+            confirmation_token=body.confirmation_token if body else None,
         )
         return _operation(await service.get_operation(staff.service_id, operation_id))
     except Exception as exc:
@@ -404,5 +421,23 @@ async def list_deliveries(
                 **{state.value: counts[state] for state in DeliveryStatus}
             ),
         )
+    except Exception as exc:
+        _translate(exc)
+
+
+@router.get("/jobs/{job_id}/automatic-selection", response_model=AdminAutomaticSelectionResponse)
+async def automatic_selection(job_id: str, staff: AuthenticatedStaff = Depends(require_admin_operator),
+                              service: AdminApplicationService = Depends(get_admin_application_service)):
+    try:
+        return await service.automatic_selection(staff.service_id, job_id)
+    except Exception as exc:
+        _translate(exc)
+
+
+@router.get("/notification-operations/{operation_id}/confirmation", response_model=AdminConfirmationResponse)
+async def confirmation(operation_id: UUID, staff: AuthenticatedStaff = Depends(require_admin_operator),
+                       service: AdminApplicationService = Depends(get_admin_application_service)):
+    try:
+        return await service.confirmation(staff.service_id, operation_id)
     except Exception as exc:
         _translate(exc)

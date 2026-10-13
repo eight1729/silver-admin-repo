@@ -9,6 +9,7 @@ from app.core.jobs_diagnostics import jobs_point, jobs_failure
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from uuid import UUID
+import re
 
 from sqlalchemy import Boolean, DateTime, Integer, Text, Uuid, and_, column, func, or_, select, table
 from sqlalchemy.exc import SQLAlchemyError
@@ -31,12 +32,14 @@ from app.domain.ports.organization_service_scope import OrganizationServiceScope
 
 _members = table(
     "members", column("id", Uuid), column("member_code", Text),
-    column("full_name", Text), column("center_code", Text), schema="public",
+    column("full_name", Text), column("center_code", Text),
+    column("phone_mobile_normalized", Text), schema="public",
 )
 _jobs = table(
     "jobs", column("id", Uuid), column("job_code", Text), column("title", Text), column("summary", Text),
     column("location_text", Text), column("work_date_text", Text),
     column("status", Text), column("updated_at", DateTime(timezone=True)),
+    column("created_at", DateTime(timezone=True)),
     column("center_code", Text), schema="public",
 )
 _recommendations = table(
@@ -93,6 +96,13 @@ class CurrentDbExternalBusinessGateway:
         return updated, updated.isoformat()
 
     @staticmethod
+    def _created_at(row) -> datetime:
+        created = row["created_at"]
+        if not isinstance(created, datetime) or created.utcoffset() is None:
+            raise ExternalSystemUnavailableError("Current DB job registration date is unavailable")
+        return created.astimezone(timezone.utc)
+
+    @staticmethod
     def _status(row) -> JobStatus:
         try:
             return JobStatus(row["status"])
@@ -106,6 +116,7 @@ class CurrentDbExternalBusinessGateway:
             external_job_id=str(row["id"]), title=row["title"], summary=row["summary"],
             work_location_summary=row["location_text"], work_schedule_summary=row["work_date_text"],
             application_deadline=None, status=cls._status(row), version=version, updated_at=updated,
+            created_at=cls._created_at(row),
         )
 
     async def verify_member(
@@ -127,12 +138,17 @@ class CurrentDbExternalBusinessGateway:
         self, *, external_organization_id: str, external_member_id: str,
     ) -> ExternalMemberSummary:
         center = self._center(external_organization_id)
-        rows = await self._rows(select(_members.c.id, _members.c.full_name).where(
+        rows = await self._rows(select(_members.c.id, _members.c.full_name, _members.c.member_code,
+            func.substr(_members.c.phone_mobile_normalized,
+                        func.length(_members.c.phone_mobile_normalized) - 3, 4).label("mobile_last4")).where(
             _members.c.center_code == center, _members.c.id == self._member_id(external_member_id),
         ))
         if not rows:
             raise ExternalMemberNotFoundError("member was not found")
-        return ExternalMemberSummary(str(rows[0]["id"]), rows[0]["full_name"])
+        row = rows[0]
+        last4 = row["mobile_last4"]
+        return ExternalMemberSummary(str(row["id"]), row["full_name"], row["member_code"],
+            last4 if isinstance(last4, str) and re.fullmatch(r"[0-9]{4}", last4) else None)
 
     async def list_recommended_jobs(
         self, *, external_organization_id: str, external_member_id: str,
@@ -168,7 +184,7 @@ class CurrentDbExternalBusinessGateway:
             external_job_id=str(row["id"]), title=row["title"], description=row["summary"] or "",
             work_location=row["location_text"], work_schedule_text=row["work_date_text"],
             application_deadline=None, required_conditions=(), status=self._status(row),
-            version=version, updated_at=updated, staff_notes=None,
+            version=version, updated_at=updated, staff_notes=None, created_at=self._created_at(row),
         )
 
     # These capabilities have no confirmed mapping in this four-use-case slice.

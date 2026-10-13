@@ -309,3 +309,12 @@
 .candidate-number-filter{display:grid;gap:.35rem;max-width:20rem;font-size:.8rem;font-weight:700}
 .candidate-number-filter input{width:100%;min-width:0;padding:.55rem;border:1px solid #aebbb6;border-radius:8px;font:inherit}
 .admin-sidebar-close:focus-visible{outline:3px solid #f1b24a;outline-offset:3px}
+
+.job-date-filter { flex-wrap: wrap; align-items: end; margin-bottom: 12px; }
+.job-date-filter label { display: grid; gap: 4px; min-width: 0; }
+.job-date-filter small { flex-basis: 100%; color: #64748b; }
+.job-registration-date { display: block; font-weight: normal; font-size: 12px; color: #64748b; }
+
+.automatic-recipient-list { max-height: 22rem; overflow-y: auto; padding-left: 1.3rem; overflow-wrap: anywhere; }
+.automatic-recipient-list li { min-height: 2rem; padding: .25rem 0; }
+.automatic-message { white-space: pre-wrap; overflow-wrap: anywhere; padding: .75rem; background: #f8fafc; }

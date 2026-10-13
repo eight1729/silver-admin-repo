@@ -29,6 +29,8 @@ class MemberVerificationResult:
 class ExternalMemberSummary:
     external_member_id: str
     display_label: str | None
+    member_number: str | None = None
+    mobile_phone_last4: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +60,7 @@ class ExternalJobSummary:
     updated_at: datetime | None
     work_days: str | None = None
     work_time: str | None = None
+    created_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +77,7 @@ class ExternalJobDetail:
     updated_at: datetime | None
     staff_notes: str | None
     job_url: str | None = None
+    created_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

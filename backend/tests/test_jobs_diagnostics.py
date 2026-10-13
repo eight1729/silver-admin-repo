@@ -27,7 +27,7 @@ NOW = datetime(2026, 10, 8, tzinfo=timezone.utc)
 
 def row():
     return dict(id=UUID(int=1), title=PRIVATE, summary=PRIVATE,
-                location_text=None, work_date_text=None, status="published", updated_at=NOW)
+                location_text=None, work_date_text=None, status="published", updated_at=NOW, created_at=NOW)
 
 
 class Engine:
@@ -88,13 +88,13 @@ def capture_info(caplog):
 
 @pytest.mark.parametrize("count", [0, 1, 10])
 async def test_success_order_batch_size_and_response_contract(caplog, count):
-    service = application(gateway([MappingProxyType(row()) for _ in range(count)]))
+    service = application(gateway([MappingProxyType(dict(row(), id=UUID(int=i + 1))) for i in range(count)]))
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_for(service)), base_url="http://offline") as client:
         response = await client.get("/admin/jobs")
     assert response.status_code == 200
-    assert response.json() == [dict(job_id=str(UUID(int=1)), title=PRIVATE, location=None,
+    assert response.json() == [dict(job_id=str(UUID(int=i + 1)), title=PRIVATE, location=None,
         status="published", openings=1, version=NOW.isoformat(), summary=PRIVATE,
-        work_days=None, work_time=None)] * count
+        work_days=None, work_time=None, created_at="2026-10-08T00:00:00Z") for i in range(count)]
     lines = messages(caplog).splitlines()
     assert lines == [
         "component=admin_jobs_route operation=list_jobs_start",
@@ -185,10 +185,10 @@ async def test_dependency_failure_before_route_is_diagnosed_without_contract_cha
 
 async def test_application_result_conversion_failure(caplog):
     async def search_jobs(**kwargs):
-        return SimpleNamespace(items=None)
+        return SimpleNamespace(items=None, page=1, page_size=200)
     with pytest.raises(TypeError):
         await application(SimpleNamespace(search_jobs=search_jobs)).list_jobs("private-service")
-    assert "operation=list_jobs_response exception_class=TypeError" in messages(caplog)
+    assert "operation=list_jobs_provider exception_class=TypeError" in messages(caplog)
 
 
 async def test_route_response_conversion_failure(caplog):

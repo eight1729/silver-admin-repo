@@ -32,7 +32,8 @@ test("jobs route is read-only and uses only the existing jobs API", async () => 
   const jobs = await readFile(routeFiles.jobs, "utf8");
   assert.match(jobs, /adminApi\.jobs/);
   assert.match(jobs, /求人ID/);
-  assert.match(jobs, /href="\/admin"/);
+  assert.match(jobs, /notificationEntryUrl\(mode, pendingJob\)/);
+  assert.match(jobs, /SelectionModeDialog/);
   assert.doesNotMatch(jobs, /method:\s*["'](?:PUT|POST|DELETE)|update|delete|createJob/);
 });
 

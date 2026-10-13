@@ -5,15 +5,19 @@ export type NotificationType = "new_job_match" | "existing_job_match" | "custom_
 export type OperationStatus = "draft" | "validating" | "ready" | "blocked_external_system" | "sending" | "completed" | "completed_with_errors" | "cancelled";
 export type DeliveryStatus = "pending" | "sent" | "failed" | "unknown" | "skipped";
 
-export interface AdminJobSummary { job_id: string; title: string; location: string | null; status: JobStatus; openings: number; version: string; summary: string | null; work_days?: string | null; work_time?: string | null }
-export interface AdminJobDetail { job_id: string; title: string; description: string; location: string | null; conditions: string[]; status: JobStatus; openings: number; version: string; job_url: string; contact: string | null }
-export interface AdminCandidate { member_id: string; member_number?: string | null; display_name: string; line_linked: boolean; eligible: boolean; reason: string | null; selected: boolean; preference_summary?: string | null }
+export interface AdminJobSummary { created_at?: string | null; job_id: string; title: string; location: string | null; status: JobStatus; openings: number; version: string; summary: string | null; work_days?: string | null; work_time?: string | null }
+export interface AdminJobDetail { created_at?: string | null; job_id: string; title: string; description: string; location: string | null; conditions: string[]; status: JobStatus; openings: number; version: string; job_url: string; contact: string | null }
+export interface AdminCandidate { linkage_unknown?: boolean; recommendation_level?: number | null; member_id: string; member_number?: string | null; display_name: string; line_linked: boolean; eligible: boolean; reason: string | null; selected: boolean; preference_summary?: string | null }
 export interface AdminMessage { greeting: string; introduction: string; note: string }
-export interface AdminOperation { operation_id: string; job_id: string; job_version: string | null; notification_type: NotificationType; message: AdminMessage; status: OperationStatus; target_count: number; selected_count: number; validated_at: string | null; send_requested_at: string | null; completed_at: string | null; created_at: string; updated_at: string }
-export interface AdminValidation { operation_id: string; status: OperationStatus; can_proceed: boolean; selected_count: number; sendable_count: number; skipped_count: number; reasons: string[]; version_changed: boolean; external_system_blocked: boolean }
+export interface AdminOperation { automatic_selection?: boolean; selected_member_ids?: string[]; operation_id: string; job_id: string; job_version: string | null; notification_type: NotificationType; message: AdminMessage; status: OperationStatus; target_count: number; selected_count: number; validated_at: string | null; send_requested_at: string | null; completed_at: string | null; created_at: string; updated_at: string }
+export interface AdminValidation { target_results?: AdminValidationTarget[]; requires_staff_reconfirmation?: boolean; operation_id: string; status: OperationStatus; can_proceed: boolean; selected_count: number; sendable_count: number; skipped_count: number; reasons: string[]; version_changed: boolean; external_system_blocked: boolean }
 export interface AdminDelivery { delivery_id: string; member_id: string; status: DeliveryStatus; reason_code: string | null; created_at: string; sent_at: string | null; updated_at: string }
 export interface AdminDeliveries { items: AdminDelivery[]; summary: Record<DeliveryStatus, number> }
 export interface AdminLineSendMode { mode: "disabled" | "staging_live" | "production_live" | "unavailable"; max_recipients: number | null; message_prefix: string | null; live_send_enabled?: boolean | null; ready?: boolean | null; blocking_reasons?: string[] }
+
+export interface AdminValidationTarget { member_id: string; disposition: "send" | "skip" | "block"; reason: string | null }
+export interface AdminConfirmationTarget extends AdminValidationTarget { member_number: string | null; display_name: string | null; mobile_phone_last4: string | null }
+export interface AdminConfirmation { operation_id: string; initial_count: number; selected_count: number; sendable_count: number; excluded_count: number; message: AdminMessage; targets: AdminConfirmationTarget[]; confirmation_token: string | null; requires_revalidation: boolean; selected_recipient_limit: number | null; can_send: boolean }
 
 export class AdminApiError extends Error {
   constructor(public readonly status: number, public readonly code: string) { super(code); }
@@ -63,15 +67,17 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
 export const adminApi = {
   lineSendMode: (signal?: AbortSignal) => request<AdminLineSendMode>("/admin/line-send-mode", {}, signal),
   jobs: (signal?: AbortSignal) => request<AdminJobSummary[]>("/admin/jobs", {}, signal),
+  automaticSelection: (id: string, signal?: AbortSignal) => request<{ selected_member_ids: string[]; reason: string | null }>(`/admin/jobs/${encodeURIComponent(id)}/automatic-selection`, {}, signal),
+  confirmation: (id: string, signal?: AbortSignal) => request<AdminConfirmation>(`/admin/notification-operations/${encodeURIComponent(id)}/confirmation`, {}, signal),
   job: (id: string, signal?: AbortSignal) => request<AdminJobDetail>(`/admin/jobs/${encodeURIComponent(id)}`, {}, signal),
   notificationLink: (id: string, signal?: AbortSignal) => request<{ url: string }>(`/admin/jobs/${encodeURIComponent(id)}/notification-link`, {}, signal),
   candidates: (id: string, signal?: AbortSignal) => request<AdminCandidate[]>(`/admin/jobs/${encodeURIComponent(id)}/candidates`, {}, signal),
-  createOperation: (body: { job_id: string; notification_type: NotificationType; greeting: string; introduction: string; note: string }) => request<AdminOperation>("/admin/notification-operations", { method: "POST", body: JSON.stringify(body) }),
+  createOperation: (body: { automatic_selection?: boolean; job_id: string; notification_type: NotificationType; greeting: string; introduction: string; note: string }) => request<AdminOperation>("/admin/notification-operations", { method: "POST", body: JSON.stringify(body) }),
   operation: (id: string, signal?: AbortSignal) => request<AdminOperation>(`/admin/notification-operations/${encodeURIComponent(id)}`, {}, signal),
   updateOperation: (id: string, body: AdminMessage) => request<AdminOperation>(`/admin/notification-operations/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
-  updateTargets: (id: string, selected: string[]) => request<AdminOperation>(`/admin/notification-operations/${encodeURIComponent(id)}/targets`, { method: "PUT", body: JSON.stringify({ selected_member_ids: [...new Set(selected)] }) }),
+  updateTargets: (id: string, selected: string[], reinclude: string[] = []) => request<AdminOperation>(`/admin/notification-operations/${encodeURIComponent(id)}/targets`, { method: "PUT", body: JSON.stringify({ selected_member_ids: [...new Set(selected)], reinclude_member_ids: reinclude }) }),
   validate: (id: string) => request<AdminValidation>(`/admin/notification-operations/${encodeURIComponent(id)}/validate`, { method: "POST" }),
-  send: (id: string) => request<AdminOperation>(`/admin/notification-operations/${encodeURIComponent(id)}/send`, { method: "POST" }),
+  send: (id: string, confirmationToken?: string) => request<AdminOperation>(`/admin/notification-operations/${encodeURIComponent(id)}/send`, { method: "POST", ...(confirmationToken ? { body: JSON.stringify({ confirmation_token: confirmationToken }) } : {}) }),
   deliveries: (id: string, signal?: AbortSignal) => request<AdminDeliveries>(`/admin/notification-operations/${encodeURIComponent(id)}/deliveries`, {}, signal),
 };
 

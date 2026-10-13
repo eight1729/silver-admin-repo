@@ -155,6 +155,7 @@ SQLAlchemyの参照用table clauseはすべてschema `public`。
 | public.jobs | id | UUID（Uuid） |
 | public.jobs | job_code, title, summary, location_text, work_date_text, status, center_code | Text |
 | public.jobs | updated_at | DateTime(timezone=True)。読取り結果は非NULLのtimezone-aware datetimeが必要 |
+| public.jobs | created_at | DateTime(timezone=True)。非NULLのtimezone-aware datetime。求人新規登録日時としてUTCに正規化 |
 | public.job_recommendation_flags | member_id, job_id | UUID（Uuid） |
 | public.job_recommendation_flags | center_code | Text |
 | public.job_recommendation_flags | is_recommended | Boolean |
@@ -253,6 +254,32 @@ revision・締切への転用もない。
   `has_next = page * page_size < total_count`。範囲外pageでもtotal_countは一致する。
   Countとitemsは別SELECTであり、同時更新時のsnapshot一貫性を新たに保証するものではない。
 
+### Admin求人登録日・全件取得（Slice B）
+
+- Current DBの`jobs.created_at`をDomainの求人一覧・詳細へ投影し、Admin APIの
+  `GET /admin/jobs`・`GET /admin/jobs/{job_id}`へnullable/optionalの`created_at`
+  （ISO 8601 date-time）を追加する。既存version/updated_atとは独立し、代用しない。
+- `AdminApplicationService.list_jobs`は既存`search_jobs`をpage_size=200で呼び、
+  has_next=falseまで取得した全件をcreated_at DESC、external_job_id ASCで安定ソート。
+  日時未取得は末尾。最大100ページで打ち切る場合は503にし、部分成功にしない。
+  ページ番号・サイズ・既知total_count・重複ID・空の継続ページの異常も503。
+  既存Providerの検索順やstatus条件を変更せず、Current DBでは従来どおり全statusを一覧に含む。
+  複数SELECTを跨ぐ同時更新のsnapshot保証は追加しない。
+- Frontendの`job-registration.ts`と`JobDateFilter`を両画面で再利用する。
+  Backendで全件取得・ソート済みの配列へYYYY-MM-DDの日本時間00:00以上の条件を適用する。
+  ブラウザのtimezoneに依存せず、無効日付はエラー表示・0件、解除は全件復帰。
+  求人用のFrontendページ分割は現状ない。候補会員のページ分割・選択は変更しない。
+  求人の選択状態もフィルタから独立して保持する。
+- HTTP Adapterは未変更のためcreated_atはNULL。未指定フィルタなら一覧に残し「未取得」と表示、
+  日付指定時は除外。外部API提供後は一覧・詳細のtimezone-awareなmappingを追加する。
+  共通Applicationからのpage_size=200/has_next利用は既存HTTP paging契約の範囲内。
+- 通知選択は引き続きpublishedのみ。送信前status/version検証・認証・送信・監査は変更しない。
+- OpenAPIは`backend/scripts/export_application_openapi.py`で再生成。
+  Frontendの`admin-api.ts`は既存の手書きinterfaceへoptional fieldを追加（生成型はない）。
+- Manual Gate: 実Current DBの13求人（REC-V1-JOB-001〜003含む）の登録日・表示順、
+  両画面の日付境界・解除・選択保持・LoadingOverlayを確認する。
+  実DB、実ブラウザ、実LINEへの接続は本Sliceのオフライン検証に含まない。
+
 ### Revision / notification validation
 
 `jobs.updated_at`はtimezone-aware datetime必須。UTCへ変換し、
@@ -336,3 +363,45 @@ Engineは注入可能であり、将来Production providerへ差し替えるた�
 test-only SQLiteとasync connection doubleでSELECT / join / scope / mappingを確認する。
 SQLiteのtimezone制約はdoubleで補い、revision変換は別の直接テストで確認する。
 これは実PostgreSQLの型・collation・権限・制約・更新triggerを確認した証拠ではない。
+
+
+### Slice C — 自動初期選択とスタッフ確認
+
+- `GET /admin/jobs/{job_id}/automatic-selection`はoperator権限とservice scopeで、
+  published求人・Providerの全候補・既存LINE linkage batch（500件単位）を確認する。
+  level=5/eligible/連携済みのみ、数値文字列の桁数と値で降順、同番号はmember_id昇順、最大100名。
+  NULL levelは未評価。対象候補の番号欠損/非数値・取得失敗・batch不整合は推測せず拒否。
+  Current DBの候補portは全件list（LIMITなし）であり、新たな候補ページング契約は追加しない。
+- Operation作成へ`automatic_selection`（既定false）、Targets更新へ`reinclude_member_ids`（既定空）、
+  sendへoptional bodyの`confirmation_token`を追加。既存マニュアルAPI呼出しは有効。
+  自動Operationの初回Targets保存は、Backendが初期選択を再計算して集合一致を要求する。
+  以後のスタッフ選択は100人で切らず、既存local/capability上限を送信時に維持する。
+- 既存JSON `validation_snapshot.automatic_selection`に初期人数、初期保存済みフラグ、
+  選択変更世代、除外IDとdisposition/reasonだけを保存する（DB migration不要）。
+  本文保存はこの文脈のみ保持して検証を失効させ、対象保存は世代を更新する。
+  Eの除外は本文編集や再検証を跨いで保持。明示的な再選択ID、または保存した解除後の再追加だけで解除する。
+  SKIP除外を固定後に必要な再検証を実施するが、BLOCK・求人/version不整合は送信許可へ変換しない。
+- `GET /admin/notification-operations/{id}/confirmation`はoperator権限・所属照合後、
+  選択SのみをSEND集合Vと除外Eへ分割して返す。既存skipped_count（未選択を含む）とは別集計。
+  会員番号・氏名・携帯下4桁は所属内の会員summaryから取得し、属性未取得を明示。
+  SQLで携帯末尾のみを投影。電話全体はresponseへ出さず、自宅電話で代用しない。
+- 確認tokenはOperation/本文世代・hash/検証snapshot/Targetsのfingerprint。
+  Backendが現在の永続状態と照合するためFrontendのmodeや件数だけでは送信できない。
+  自動送信時も既存検証を必ず再実行し、LINE連携も再照会。確認時V・S・本文・求人version・
+  選択世代の不一致なら409で停止し、再確認を要求。Delivery/Outbox作成前の上限検査、
+  capability、原子的送信予約、idempotencyは維持する。
+- 自動Operationの編集/検証書込みには既存repositoryの行ロック内でexpected_operation照合を追加。
+  競合した検証結果で別スタッフの編集を上書きしない。既存Audit/Outbox/Deliveryの状態遷移は変更しない。
+  電話/氏名/会員番号は上記文脈やAudit/Outboxへ追加しない。
+- Admin-only属性がLINE向けS2S APIへ流出しないよう、既存v1 responseを明示allowlist化。
+  `admin-internal-api-v1.openapi.json`は変更しない（既存artifactとの一致をテスト）。
+  Public OpenAPIは既存exportスクリプトで更新、Frontendは既存手書き型運用。
+- `/admin?mode=auto|manual&jobId=...`で入口を共有。自動画面は既存会員選択・通知文編集・
+  Modal・LoadingOverlay・配信結果パネルを再利用する。会員選択は選択済み優先、次にlevel降順・番号数値降順。
+  自動画面のsessionStorageはOperation IDのみ。再読込で選択SをBackendから復元し、
+  確認tokenは復元せず再保存・再検証を要求。作成だけ成功した場合も同じOperationを再利用する。
+- HTTP Adapterは未変更。推薦レベル等が未提供なら自動選択は成立しない。
+  現Current DB fixtureは実LINE送信先を持たず、実際に100名送信可能という意味ではない。
+- Manual Gate: 実Googleログイン/権限、Current DBの属性とscope、実ブラウザでの
+  モード選択・URL引継ぎ・再読込・フォーカス・各一覧約10名とModal内スクロール、
+  LINE capability/連携正本との接続。実送信/大量送信は本Sliceでは実施しない。

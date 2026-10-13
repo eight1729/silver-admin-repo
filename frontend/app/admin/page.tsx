@@ -1,5 +1,6 @@
 "use client";
 
+import { NotificationEntry } from "./NotificationEntry";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { orderCandidates } from "./candidate-order";
 
@@ -37,6 +38,10 @@ const initialMessage: AdminMessage = {
 };
 
 export default function AdminPage() {
+  return <NotificationEntry manual={(jobId) => <ManualAdminPage initialJobId={jobId} />} />;
+}
+
+function ManualAdminPage({ initialJobId }: { initialJobId: string | null }) {
   const [step, setStep] = useState<Step>("jobs");
   const [jobs, setJobs] = useState<AdminJobSummary[]>([]);
   const [job, setJob] = useState<AdminJobDetail | null>(null);
@@ -133,6 +138,17 @@ export default function AdminPage() {
     // The loop owns subsequent snapshots; rendering them must not restart its timer.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshOperationId, refreshEnabled]);
+
+  const entryApplied = useRef(false);
+  useEffect(() => {
+    if (!initialJobId || loading || restoringOperation || entryApplied.current) return;
+    entryApplied.current = true;
+    const entryJob = jobs.find((item) => item.job_id === initialJobId);
+    if (!entryJob || entryJob.status !== "published") { setError("指定された求人は選択できません。求人一覧から選び直してください。"); return; }
+    requestJobSelection(initialJobId);
+    // Apply URL intent once; later edits remain owned by the existing workflow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialJobId, jobs, loading, restoringOperation]);
 
   const showError = (value: unknown) => setError(adminErrorMessage(value));
   const clearFeedback = () => { setError(""); setSuccess(""); };

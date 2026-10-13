@@ -219,9 +219,11 @@ class SqlAlchemyAdminNotificationRepository:
         async with self._engine.connect() as conn:
             return await self._require_operation(conn, service_id, operation_id)
 
-    async def update_operation(self, service_id, operation_id, operation):
+    async def update_operation(self, service_id, operation_id, operation, *, expected_operation=None):
         async with self._engine.begin() as conn:
             current = await self._require_operation(conn, service_id, operation_id, lock=True)
+            if expected_operation is not None and current != expected_operation:
+                raise ReservedNotificationMutationError("operation changed concurrently")
             self._guard_snapshot(current, operation)
             if operation.operation_id != operation_id:
                 raise RepositoryStateError("operation_id cannot be changed")
@@ -238,13 +240,15 @@ class SqlAlchemyAdminNotificationRepository:
         return stored
 
     async def update_operation_with_audit(
-        self, service_id, operation_id, operation, event
+        self, service_id, operation_id, operation, event, *, expected_operation=None
     ):
         try:
             async with self._engine.begin() as conn:
                 current = await self._require_operation(
                     conn, service_id, operation_id, lock=True
                 )
+                if expected_operation is not None and current != expected_operation:
+                    raise ReservedNotificationMutationError("operation changed concurrently")
                 self._guard_snapshot(current, operation)
                 if operation.operation_id != operation_id:
                     raise RepositoryStateError("operation_id cannot be changed")
@@ -311,7 +315,7 @@ class SqlAlchemyAdminNotificationRepository:
         return await self.get_targets(service_id, operation_id)
 
     async def replace_targets_with_operation_and_audit(
-        self, service_id, operation_id, targets, operation, event
+        self, service_id, operation_id, targets, operation, event, *, expected_operation=None
     ):
         pending = tuple(targets)
         seen = set()
@@ -329,6 +333,8 @@ class SqlAlchemyAdminNotificationRepository:
                     conn, service_id, operation_id, lock=True
                 )
                 self._guard_targets(current)
+                if expected_operation is not None and current != expected_operation:
+                    raise ReservedNotificationMutationError("operation changed concurrently")
                 self._guard_snapshot(current, operation)
                 if operation.operation_id != operation_id:
                     raise RepositoryStateError("operation_id cannot be changed")

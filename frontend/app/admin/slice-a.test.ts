@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import React from "react";
+import { filterRegisteredJobs, formatJobRegistration } from "./job-registration.ts";
 import { filterCandidates, memberNumberAtLeast } from "./candidate-filters.ts";
 import type { AdminCandidate } from "../lib/admin-api";
 
@@ -72,6 +73,10 @@ function jobsHarness() {
       return [values[index], (value: any) => { values[index] = value; writes++; }];
     } },
     "../../lib/admin-api": { adminApi: { jobs: (signal: AbortSignal) => new Promise((resolve, reject) => requests.push({ signal, resolve, reject })) }, adminErrorMessage: () => "取得失敗" },
+    "../JobDateFilter": { JobDateFilter: "date-filter" },
+    "../SelectionModeDialog": { SelectionModeDialog: "mode-dialog" },
+    "../automatic-workflow": { notificationEntryUrl: () => "/admin?mode=manual" },
+    "../job-registration": { filterRegisteredJobs, formatJobRegistration },
     "../AdminRouteFrame": { AdminRouteFrame: "frame" }, "../LoadingOverlay": { LoadingOverlay: "overlay" }, "../job-status": { jobStatusLabel: () => "公開" },
   }).default;
   const render = () => { cursor = 0; return Page(); };
@@ -87,11 +92,11 @@ test("jobs overlay clears on failure and retry success, retaining the existing e
   h.requests[0].reject(new Error("offline")); await flush();
   const failed = h.render();
   assert.equal(failed.props.children[0].props.active, false);
-  assert.equal(h.values[2], "取得失敗");
-  const retry = failed.props.children[2].props.children[1].props.onClick;
+  assert.equal(failed.props.children.find((child: any) => child?.props?.role === "alert").props.children[0].props.children, "取得失敗");
+  const retry = failed.props.children.find((child: any) => child?.props?.role === "alert").props.children[1].props.onClick;
   retry();
   assert.equal(h.render().props.children[0].props.active, true);
-  assert.equal(h.values[2], "");
+  assert.equal(h.render().props.children.some((child: any) => child?.props?.role === "alert"), false);
   h.requests[1].resolve([]); await flush();
   assert.equal(h.render().props.children[0].props.active, false);
   h.cleanup();
@@ -100,13 +105,13 @@ test("jobs overlay clears on failure and retry success, retaining the existing e
 test("replaced and unmounted job requests cannot update data, errors or loading", async () => {
   const h = jobsHarness();
   h.requests[0].reject(new Error("offline")); await flush();
-  const retry = h.render().props.children[2].props.children[1].props.onClick;
+  const retry = h.render().props.children.find((child: any) => child?.props?.role === "alert").props.children[1].props.onClick;
   retry(); retry();
   assert.equal(h.requests[1].signal.aborted, true);
   const before = h.writes();
   h.requests[1].resolve([{ job_id: "stale" }]); await flush();
   assert.equal(h.writes(), before);
-  assert.equal(h.values[1], true);
+  assert.equal(h.render().props.children[0].props.active, true);
   h.cleanup();
   assert.equal(h.requests[2].signal.aborted, true);
   h.requests[2].reject(new Error("late failure")); await flush();

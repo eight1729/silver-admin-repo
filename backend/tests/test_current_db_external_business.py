@@ -81,8 +81,9 @@ class QueryEngine:
             raise self.error
         rows = [dict(row) for row in self.connection.execute(statement).mappings()]
         for row in rows:
-            if isinstance(row.get("updated_at"), datetime):
-                row["updated_at"] = row["updated_at"].replace(tzinfo=timezone.utc)
+            for field in ("updated_at", "created_at"):
+                if isinstance(row.get(field), datetime):
+                    row[field] = row[field].replace(tzinfo=timezone.utc)
         return SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: rows))
 
 
@@ -104,7 +105,7 @@ def db():
         ])
         connection.execute(tables["jobs"].insert(), [
             {"id": job_id, "title": "Job", "summary": "Description", "location_text": "Place",
-             "work_date_text": "Schedule", "status": status, "updated_at": NOW, "center_code": center}
+             "work_date_text": "Schedule", "status": status, "updated_at": NOW, "created_at": NOW - timedelta(days=10), "center_code": center}
             for job_id, center, status in [
                 (J1, "center-a", "published"), (J2, "center-b", "published"),
                 (J3, "center-a", "published"), (J4, "center-a", "closed"),
@@ -155,10 +156,23 @@ async def test_member_summary_minimal_projection(db):
     summary = await db[0].get_member_summary(external_organization_id="org-a", external_member_id=str(M1))
     assert summary.external_member_id == str(M1)
     assert summary.display_label == "Test Name"
-    assert {field.name for field in fields(summary)} == {"external_member_id", "display_label"}
+    assert {field.name for field in fields(summary)} == {"external_member_id", "display_label", "member_number", "mobile_phone_last4"}
     sql = str(db[1].statements[-1].compile(dialect=postgresql.dialect()))
     assert "public.members" in sql
-    assert "full_name" in sql and "member_code" not in sql
+    assert "full_name" in sql and "member_code" in sql
+    assert "substr(" in sql and "length(" in sql
+    assert summary.mobile_phone_last4 is None
+
+
+@pytest.mark.parametrize("phone,expected", [(None, None), ("TEST-ONLY-4321", "4321"), ("bad", None), ("123X", None)])
+async def test_confirmation_mobile_suffix_is_projected_without_full_number(db, phone, expected):
+    gateway, engine, tables = db
+    engine.connection.execute(tables["members"].update().where(tables["members"].c.id == M1)
+                              .values(phone_mobile_normalized=phone))
+    member = await gateway.get_member_summary(external_organization_id="org-a", external_member_id=str(M1))
+    assert member.mobile_phone_last4 == expected
+    assert member.member_number == "0007"
+    assert not hasattr(member, "phone_mobile_normalized")
 
 
 @pytest.mark.parametrize("member_id", [str(M2), str(UUID(int=999)), "0007", "invalid"])

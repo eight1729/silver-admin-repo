@@ -1,5 +1,7 @@
 """Versioned Admin business API. No request, response or exception payload logging."""
 
+from dataclasses import fields
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.responses import JSONResponse
@@ -12,10 +14,11 @@ from app.domain.errors.errors import (
     ExternalBusinessError, ExternalJobNotFoundError, ExternalMemberNotFoundError,
 )
 from app.domain.models.external_business import (
-    ExternalJobDetail, ExternalJobSummary, ExternalMemberSummary, MemberVerificationInput,
+    MemberVerificationInput,
 )
 from app.domain.ports.organization_service_scope import OrganizationServiceScopeNotConfiguredError
 from app.schemas.admin_internal import (
+    ExternalJobDetail, ExternalJobSummary, ExternalMemberSummary,
     InternalErrorResponse, JobDetailRequest, MemberRequest, MemberVerificationRequest,
     MemberVerificationResponse, MultipleMemberMatch, NoMemberMatch, UniqueMemberMatch,
 )
@@ -84,18 +87,21 @@ async def verify_member(
 async def member_summary(
     body: MemberRequest, service: AdminInternalService = Depends(get_admin_internal_service),
 ):
-    return await service.get_member_summary(body.service_id, body.external_member_id)
+    result = await service.get_member_summary(body.service_id, body.external_member_id)
+    return ExternalMemberSummary(result.external_member_id, result.display_label)
 
 
 @router.post("/members:recommended-jobs", response_model=list[ExternalJobSummary])
 async def recommended_jobs(
     body: MemberRequest, service: AdminInternalService = Depends(get_admin_internal_service),
 ):
-    return await service.list_recommended_jobs(body.service_id, body.external_member_id)
+    results = await service.list_recommended_jobs(body.service_id, body.external_member_id)
+    return [{f.name: getattr(item, f.name, None) for f in fields(ExternalJobSummary)} for item in results]
 
 
 @router.post("/jobs:detail", response_model=ExternalJobDetail)
 async def job_detail(
     body: JobDetailRequest, service: AdminInternalService = Depends(get_admin_internal_service),
 ):
-    return await service.get_job_detail(body.service_id, body.external_job_id)
+    result = await service.get_job_detail(body.service_id, body.external_job_id)
+    return {f.name: getattr(result, f.name, None) for f in fields(ExternalJobDetail)}
