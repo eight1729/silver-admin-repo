@@ -36,7 +36,7 @@ class Engine:
         return SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: rows))
 
 
-@pytest.mark.parametrize("failure", [None, "sql", "timeout", "incomplete", "http"])
+@pytest.mark.parametrize("failure", [None, "sql", "timeout", "incomplete", "http", "slow_success", "read_timeout", "malformed"])
 async def test_candidate_request_boundaries_and_no_private_values(caplog, failure):
     caplog.set_level(logging.INFO, logger=LOGGER)
     engine = Engine()
@@ -48,8 +48,17 @@ async def test_candidate_request_boundaries_and_no_private_values(caplog, failur
     calls = []
     async def transport(request):
         calls.append(request.url.path)
+        if failure in {"slow_success", "read_timeout"}:
+            # Virtual read wait: MockTransport does not enforce socket timeouts.
+            # Verify the budget handed to the transport without sleeping 180s.
+            assert request.extensions["timeout"]["read"] == 180.0
+            simulated_wait = 10.1 if failure == "slow_success" else 180.1
+            if simulated_wait > request.extensions["timeout"]["read"]:
+                raise httpx.ReadTimeout(PRIVATE)
         if failure == "timeout":
             raise httpx.ConnectTimeout(PRIVATE)
+        if failure == "malformed":
+            return httpx.Response(200, json={"invalid": PRIVATE})
         if failure == "http":
             return httpx.Response(503, text=PRIVATE)
         return httpx.Response(200, json={"items": [] if failure == "incomplete" else [
@@ -63,8 +72,9 @@ async def test_candidate_request_boundaries_and_no_private_values(caplog, failur
         service._line_internal_client = line
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_for(service)), base_url="http://offline") as client:
             response = await client.get(f"/admin/jobs/{UUID(int=1)}/candidates")
-        assert response.status_code == (503 if failure else 200)
-        if not failure:
+        success = failure in {None, "slow_success"}
+        assert response.status_code == (200 if success else 503)
+        if success:
             assert len(response.json()) == 120
             assert all(not item["line_linked"] for item in response.json())
         records = [r for r in caplog.records if r.name == LOGGER]
@@ -83,11 +93,16 @@ async def test_candidate_request_boundaries_and_no_private_values(caplog, failur
         if failure == "timeout":
             assert "cause_class=ConnectTimeout" in text and "reason_category=timeout" in text
             assert "stage=line_http_response" not in text
+        elif failure == "read_timeout":
+            assert "cause_class=ReadTimeout" in text and "reason_category=timeout" in text
+            assert "stage=line_http_response" not in text
+        elif failure == "malformed":
+            assert "reason_category=contract" in text
         elif failure == "incomplete":
             assert "request_count=120 response_count=0 matched_count=0" in text
         elif failure == "http":
             assert "http_status=503" in text and "reason_category=http" in text
-        elif not failure:
+        elif success:
             assert "request_count=120 response_count=120 matched_count=120" in text
         # Scope resets after success AND failure. Non-candidate linkage calls stay quiet.
         caplog.clear()

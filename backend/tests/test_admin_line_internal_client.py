@@ -85,6 +85,26 @@ async def test_client_uses_bearer_and_exact_five_contract_operations():
     await http.aclose()
 
 
+@pytest.mark.parametrize("base", [httpx.Timeout(10.0), httpx.Timeout(10.0, connect=2.0, write=3.0, pool=4.0)])
+async def test_only_linkage_batch_overrides_read_timeout_without_mutating_shared_client(base):
+    observed = []
+    def handler(request):
+        observed.append(request.extensions["timeout"])
+        if request.url.path.endswith("line-linkages:batch-get"):
+            return httpx.Response(200, json={"items": []})
+        return httpx.Response(200, json={"canonical_deep_link": "https://example.invalid/job"})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=base) as http:
+        client = HttpLineInternalApiClient(client=http, base_url="https://line.internal",
+            bearer_token=SecretStr("offline"), environment="production")
+        scope = ServiceOrganizationScope(organization_id="org", service_id="svc")
+        await client.resolve_deep_link(LiffDeepLinkRequest(scope=scope, job_id="job"))
+        await client.batch_get_linkages(LinkageStatusBatchRequest(scope=scope, external_member_ids=("member",)))
+        await client.resolve_deep_link(LiffDeepLinkRequest(scope=scope, job_id="job"))
+        await http.get("https://example.invalid/unrelated")
+        assert observed == [base.as_dict(), {**base.as_dict(), "read": 180.0}, base.as_dict(), base.as_dict()]
+        assert http.timeout.as_dict() == base.as_dict()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error", [httpx.ConnectError("x"), httpx.ReadTimeout("x")])
 async def test_client_transport_failure_is_retryable_and_secret_safe(error):

@@ -130,6 +130,12 @@ class HttpLineInternalApiClient:
         )
 
     async def _request(self, method, path, model, *, expected_status, json=None):
+        request_options = {}
+        if method == "POST" and path == "/internal/v1/line-linkages:batch-get":
+            # Copy per request: preserve connect/write/pool and the shared client.
+            timeout = httpx.Timeout(self._client.timeout)
+            timeout.read = 180.0
+            request_options["timeout"] = timeout
         try:
             with candidate_span("line_http") if path == "/internal/v1/line-linkages:batch-get" else nullcontext():
                 response = await self._client.request(
@@ -140,6 +146,7 @@ class HttpLineInternalApiClient:
                         "Accept": "application/json",
                     },
                     json=json,
+                    **request_options,
                 )
             if path == "/internal/v1/line-linkages:batch-get":
                 candidate_point("line_http_response", http_status=response.status_code)
