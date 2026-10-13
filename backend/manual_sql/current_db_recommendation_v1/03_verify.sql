@@ -42,3 +42,11 @@ FROM public.job_recommendation_flags WHERE center_code='sumida';
 SELECT min(created_at) FILTER (WHERE substring(member_code from '^[0-9]+$')::numeric >= 71)
      > max(created_at) FILTER (WHERE substring(member_code from '^[0-9]+$')::numeric <= 70) AS newest_50_are_newer
 FROM public.members WHERE center_code='sumida';
+
+-- All 90 newly added members require the deterministic fictional birth date.
+SELECT count(*) AS fixture_members_90,
+ count(*) FILTER (WHERE birth_date IS NULL) AS missing_birth_dates_0,
+ min(extract(year FROM age(DATE '2026-12-31',birth_date))) AS youngest_60,
+ max(extract(year FROM age(DATE '2026-12-31',birth_date))) AS oldest_80
+FROM public.members WHERE center_code='sumida'
+ AND substring(member_code from '^[0-9]+$')::numeric BETWEEN 31 AND 120;

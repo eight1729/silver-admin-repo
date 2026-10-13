@@ -7,7 +7,7 @@ import importlib.util
 from pathlib import Path
 import re
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -44,11 +44,48 @@ def test_migration_preserves_legacy_bool_and_unknown_level_and_checks_range():
     assert 'NOT a.atthasdef' in sql and 'NOT a.attnotnull' in sql
 
 
+@pytest.mark.parametrize('name', ['01_recommendation_level.sql', '02_seed.sql'])
+def test_each_write_sql_overrides_inherited_consent_with_rejecting_placeholders(name):
+    sql = (ROOT / name).read_text(encoding='utf-8')
+    statements = '\n'.join(line for line in sql.splitlines() if not line.lstrip().startswith('--'))
+    before_guard = statements.split('DO $guard$')[0].strip()
+    assert before_guard == ("BEGIN;\n"
+        "SET LOCAL silver.fixture_consent = 'REPLACE_WITH_SUMIDA_TEST_CONSENT';\n"
+        "SET LOCAL silver.fixture_database = 'REPLACE_WITH_VERIFIED_DATABASE_NAME';")
+    assert "IS DISTINCT FROM 'sumida-test-only-v1'" in sql
+    assert "IS DISTINCT FROM current_database()" in sql
+
+
+def test_manifest_birth_dates_are_fixed_fictional_and_keep_identity():
+    rows = generator.members()
+    assert rows == generator.members() and len(rows) == 90
+    assert len({r[0] for r in rows}) == len({r[1] for r in rows}) == 90
+    for uid, code, _, _, birthday in rows:
+        assert uid == str(generator.uuid5(generator.NAMESPACE, f'sumida/member/{code}'))
+        birth = date.fromisoformat(birthday)
+        assert 60 <= 2026 - birth.year <= 80  # age at fixed 2026-12-31
+    assert len({r[-1] for r in rows}) > 21
+
+
+def test_insert_targets_match_explicit_projection_and_catalog_guard():
+    sql = generator.render()
+    for table in ('members', 'jobs', 'job_recommendation_flags'):
+        target, projection = re.search(rf'INSERT INTO public\.{table}\(([^)]+)\)\n SELECT (.*?) FROM', sql).groups()
+        columns = target.split(',')
+        assert projection.split(',') == ['f.' + c for c in columns]
+        catalog_columns = re.search(rf"'public\.{table}'::regclass, ARRAY\[([^]]+)\]", sql)[1]
+        assert re.findall(r"'([^']+)'", catalog_columns) == columns
+    assert 'DO $schema$' in sql and sql.index('END $schema$') < sql.index('CREATE TEMP TABLE')
+    assert "atttypid='date'::regtype AND attnotnull" in sql
+    assert 'a.attnotnull AND NOT a.atthasdef' in sql
+    assert "a.attidentity='' AND a.attgenerated=''" in sql
+
+
 @pytest.fixture
 def fixture_db():
     db = sqlite3.connect(':memory:')
     db.execute("ATTACH DATABASE ':memory:' AS public")
-    db.execute('CREATE TABLE public.members(id TEXT PRIMARY KEY,member_code TEXT,full_name TEXT,center_code TEXT,phone_mobile_normalized TEXT,created_at TEXT,updated_at TEXT,UNIQUE(center_code,member_code))')
+    db.execute('CREATE TABLE public.members(id TEXT PRIMARY KEY,member_code TEXT,full_name TEXT,center_code TEXT,phone_mobile_normalized TEXT,created_at TEXT,updated_at TEXT,birth_date DATE NOT NULL,UNIQUE(center_code,member_code))')
     db.execute('CREATE TABLE public.jobs(id TEXT PRIMARY KEY,job_code TEXT,title TEXT,summary TEXT,location_text TEXT,work_date_text TEXT,status TEXT,center_code TEXT,created_at TEXT,updated_at TEXT,UNIQUE(center_code,job_code))')
     db.execute('CREATE TABLE public.job_recommendation_flags(member_id TEXT,job_id TEXT,center_code TEXT,is_recommended BOOLEAN NOT NULL DEFAULT true,recommendation_level INTEGER CHECK(recommendation_level BETWEEN 1 AND 5),created_at TEXT,updated_at TEXT,UNIQUE(center_code,job_id,member_id))')
     # Use the actual rendered manifest VALUES in SQLite, changing only UUID type to TEXT.
@@ -58,16 +95,16 @@ def fixture_db():
         db.execute(create.replace('uuid', 'TEXT').replace(' ON COMMIT DROP', ''))
         db.execute(re.search(rf'INSERT INTO _rec_{table}_manifest VALUES.*?;', seed, re.S)[0])
     for number in range(1, 31):
-        db.execute("INSERT INTO public.members VALUES (?,?,?,'sumida',NULL,'2026-01-01','2026-01-01')", (f'legacy-{number}', f'{number:04}', 'legacy'))
+        db.execute("INSERT INTO public.members VALUES (?,?,?,'sumida',NULL,'2026-01-01','2026-01-01',?)", (f'legacy-{number}', f'{number:04}', 'legacy',f'1950-01-{1 + number % 28:02}'))
     for number in range(1, 11):
         db.execute("INSERT INTO public.jobs VALUES (?,?,'legacy',NULL,NULL,NULL,'published','sumida','2026-01-01','2026-01-01')", (f'legacy-job-{number}',f'TEST-JOB-{number:03}'))
     for number in range(65):
         db.execute("INSERT INTO public.job_recommendation_flags VALUES (?,?,'sumida',true,NULL,'2026-01-01','2026-01-01')", (f'legacy-{number % 30 + 1}', f'legacy-job-{number // 30 + 1}'))
     baseline = datetime(2026, 1, 1, tzinfo=timezone.utc)
     db.execute('CREATE TEMP TABLE _rec_members AS SELECT * FROM public.members WHERE 0')
-    for uid, code, name, hours in db.execute('SELECT * FROM _rec_member_manifest').fetchall():
+    for uid, code, name, hours, birth_date in db.execute('SELECT * FROM _rec_member_manifest').fetchall():
         ts = (baseline + timedelta(hours=hours)).isoformat()
-        db.execute('INSERT INTO _rec_members VALUES (?,?,?,?,?,?,?)', (uid, code, name, 'sumida', None, ts, ts))
+        db.execute('INSERT INTO _rec_members VALUES (?,?,?,?,?,?,?,?)', (uid, code, name, 'sumida', None, ts, ts, birth_date))
     db.execute('CREATE TEMP TABLE _rec_jobs AS SELECT * FROM public.jobs WHERE 0')
     for uid, code, title, days in db.execute('SELECT * FROM _rec_job_manifest').fetchall():
         ts = (baseline + timedelta(days=days)).isoformat()
@@ -115,9 +152,22 @@ def test_seed_dml_idempotence_distribution_and_legacy_preservation(fixture_db):
     for code in range(1,121):
         assert len({r[2] for r in generator.ratings() if r[0]==str(code)}) > 1
     assert all(row[4] is None for row in snapshot[0][30:])
+    assert [row[7] for row in snapshot[0][:30]] == [row[7] for row in legacy[0]]
+    assert {row[1]:row[7] for row in snapshot[0][30:]} == {r[1]:r[4] for r in generator.members()}
 
 
-@pytest.mark.parametrize('conflict', ['same_code', 'same_id', 'changed_member', 'changed_job', 'changed_flag'])
+def test_missing_birth_date_fails_without_default(fixture_db):
+    db = fixture_db
+    column = next(row for row in db.execute('PRAGMA public.table_info(members)') if row[1]=='birth_date')
+    assert column[2]=='DATE' and column[3]==1 and column[4] is None
+    sql = re.search(r'INSERT INTO public\.members\(.*?;', generator.render(), re.S)[0]
+    old_sql = sql.replace(',birth_date)', ')').replace(',f.birth_date FROM', ' FROM')
+    with pytest.raises(sqlite3.IntegrityError, match='birth_date'):
+        db.execute(old_sql)
+    assert db.execute('SELECT count(*) FROM public.members').fetchone() == (30,)
+
+
+@pytest.mark.parametrize('conflict', ['same_code', 'same_id', 'changed_member', 'changed_birth_date', 'changed_job', 'changed_flag'])
 def test_fixture_conflicts_abort_without_overwrite(fixture_db, conflict):
     db = fixture_db
     apply_fixture(db)
@@ -127,6 +177,8 @@ def test_fixture_conflicts_abort_without_overwrite(fixture_db, conflict):
         db.execute("UPDATE public.members SET member_code='999' WHERE member_code='31'")
     elif conflict=='changed_member':
         db.execute("UPDATE public.members SET full_name='changed' WHERE member_code='31'")
+    elif conflict=='changed_birth_date':
+        db.execute("UPDATE public.members SET birth_date='1940-01-01' WHERE member_code='31'")
     elif conflict=='changed_job':
         db.execute("UPDATE public.jobs SET updated_at='changed' WHERE job_code='REC-V1-JOB-001'")
     else:

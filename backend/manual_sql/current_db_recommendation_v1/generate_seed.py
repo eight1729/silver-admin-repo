@@ -1,5 +1,6 @@
 """Offline SQL renderer; imports no application settings and never connects to a DB."""
 from pathlib import Path
+from datetime import date
 from uuid import UUID, uuid5
 import argparse
 
@@ -8,8 +9,10 @@ NAMESPACE = UUID('2844f083-9685-55ab-a141-01b34f7a5537')
 
 
 def members():
+    # Fictional dates: ages 60..80 at fixed 2026-12-31, never dependent on today.
     return [(str(uuid5(NAMESPACE, f'sumida/member/{n}')), str(n),
-             f'CURRENT-DB-REC-V1 MEMBER {n:03}', n - 30) for n in range(31, 121)]
+             f'CURRENT-DB-REC-V1 MEMBER {n:03}', n - 30,
+             date(1946 + (n - 31) % 21, 1 + (n - 31) % 12, 1 + (n - 31) % 28).isoformat()) for n in range(31, 121)]
 
 
 def jobs():

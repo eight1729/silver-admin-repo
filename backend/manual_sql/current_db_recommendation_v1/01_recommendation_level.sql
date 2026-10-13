@@ -1,5 +1,9 @@
 -- MANUAL ONLY. Confirm the test project, then set both guards as described in README.
 BEGIN;
+-- Edit these two literals in the execution copy after checking the test project.
+-- Always overwrite inherited session values; unchanged placeholders MUST fail.
+SET LOCAL silver.fixture_consent = 'sumida-test-only-v1';
+SET LOCAL silver.fixture_database = 'postgres';
 DO $guard$
 BEGIN
   IF current_setting('silver.fixture_consent', true) IS DISTINCT FROM 'sumida-test-only-v1'

@@ -11,6 +11,17 @@ SELECT tgrelid::regclass AS table_name,tgname,tgenabled,pg_get_triggerdef(oid) A
 FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN
  ('public.members'::regclass,'public.jobs'::regclass,'public.job_recommendation_flags'::regclass);
 SELECT pg_get_functiondef('public.set_updated_at()'::regprocedure);
+-- Must return zero rows. Any omitted required column blocks this fixture.
+SELECT a.attrelid::regclass AS table_name,a.attname AS omitted_required_column,
+ format_type(a.atttypid,a.atttypmod) AS data_type
+FROM pg_attribute a JOIN (VALUES
+ ('public.members'::regclass, ARRAY['id','member_code','full_name','center_code','phone_mobile_normalized','created_at','updated_at','birth_date']),
+ ('public.jobs'::regclass, ARRAY['id','job_code','title','summary','location_text','work_date_text','status','center_code','created_at','updated_at']),
+ ('public.job_recommendation_flags'::regclass, ARRAY['member_id','job_id','center_code','is_recommended','recommendation_level','created_at','updated_at'])
+) AS targets(relid, inserted_columns) ON targets.relid=a.attrelid
+WHERE a.attnum>0 AND NOT a.attisdropped AND a.attnotnull AND NOT a.atthasdef
+ AND a.attidentity='' AND a.attgenerated='' AND NOT (a.attname=ANY(targets.inserted_columns))
+ORDER BY a.attrelid,a.attnum;
 SELECT count(*) AS member_count,
  count(DISTINCT substring(member_code from '^[0-9]+$')::numeric) AS unique_numeric_codes,
  min(substring(member_code from '^[0-9]+$')::numeric) AS numeric_min,

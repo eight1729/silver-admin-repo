@@ -1,5 +1,9 @@
 -- INSERT-only, sumida test fixtures. No trigger disabling, UPDATE, DELETE or LINE data.
 BEGIN;
+-- Edit these two literals in the execution copy after checking the test project.
+-- Always overwrite inherited session values; unchanged placeholders MUST fail.
+SET LOCAL silver.fixture_consent = 'REPLACE_WITH_SUMIDA_TEST_CONSENT';
+SET LOCAL silver.fixture_database = 'REPLACE_WITH_VERIFIED_DATABASE_NAME';
 DO $guard$
 BEGIN
   IF current_setting('silver.fixture_consent', true) IS DISTINCT FROM 'sumida-test-only-v1'
@@ -9,7 +13,30 @@ BEGIN
 END $guard$;
 LOCK TABLE public.members, public.jobs, public.job_recommendation_flags IN SHARE ROW EXCLUSIVE MODE;
 
-CREATE TEMP TABLE _rec_member_manifest(id uuid PRIMARY KEY, member_code text UNIQUE, full_name text, hours integer) ON COMMIT DROP;
+-- Fail before fixture writes if a required non-defaulted column is omitted.
+DO $schema$
+DECLARE omitted_columns text;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='public.members'::regclass
+      AND attname='birth_date' AND atttypid='date'::regtype AND attnotnull
+      AND NOT atthasdef AND NOT attisdropped AND attidentity='' AND attgenerated='') THEN
+    RAISE EXCEPTION 'Expected members.birth_date DATE NOT NULL without default; no correction attempted';
+  END IF;
+  SELECT string_agg(a.attrelid::regclass::text || '.' || a.attname, ', ' ORDER BY a.attrelid, a.attnum)
+  INTO omitted_columns
+  FROM pg_attribute a JOIN (VALUES
+    ('public.members'::regclass, ARRAY['id','member_code','full_name','center_code','phone_mobile_normalized','created_at','updated_at','birth_date']),
+    ('public.jobs'::regclass, ARRAY['id','job_code','title','summary','location_text','work_date_text','status','center_code','created_at','updated_at']),
+    ('public.job_recommendation_flags'::regclass, ARRAY['member_id','job_id','center_code','is_recommended','recommendation_level','created_at','updated_at'])
+  ) AS targets(relid, inserted_columns) ON targets.relid=a.attrelid
+  WHERE a.attnum>0 AND NOT a.attisdropped AND a.attnotnull AND NOT a.atthasdef
+    AND a.attidentity='' AND a.attgenerated='' AND NOT (a.attname=ANY(targets.inserted_columns));
+  IF omitted_columns IS NOT NULL THEN
+    RAISE EXCEPTION 'Required columns omitted from fixture: %. Stop and review schema.', omitted_columns;
+  END IF;
+END $schema$;
+
+CREATE TEMP TABLE _rec_member_manifest(id uuid PRIMARY KEY, member_code text UNIQUE, full_name text, hours integer, birth_date date NOT NULL) ON COMMIT DROP;
 INSERT INTO _rec_member_manifest VALUES
 {{MEMBERS}};
 CREATE TEMP TABLE _rec_job_manifest(id uuid PRIMARY KEY, job_code text UNIQUE, title text, days integer) ON COMMIT DROP;
@@ -71,7 +98,7 @@ CREATE TEMP TABLE _rec_members ON COMMIT DROP AS
  SELECT f.id, f.member_code, f.full_name, 'sumida'::text AS center_code,
         NULL::text AS phone_mobile_normalized,
         b.ts + f.hours * interval '1 hour' AS created_at,
-        b.ts + f.hours * interval '1 hour' AS updated_at
+        b.ts + f.hours * interval '1 hour' AS updated_at, f.birth_date
  FROM _rec_member_manifest f CROSS JOIN _rec_base b;
 CREATE TEMP TABLE _rec_jobs ON COMMIT DROP AS
  SELECT f.id, f.job_code, f.title, 'Dedicated recommendation fixture v1'::text AS summary,
@@ -85,8 +112,8 @@ DO $ownership$
 BEGIN
   IF EXISTS (SELECT 1 FROM _rec_members f JOIN public.members m
        ON m.id=f.id OR (m.center_code=f.center_code AND m.member_code=f.member_code)
-       WHERE ROW(m.id,m.member_code,m.full_name,m.center_code,m.phone_mobile_normalized,m.created_at,m.updated_at)
-       IS DISTINCT FROM ROW(f.id,f.member_code,f.full_name,f.center_code,f.phone_mobile_normalized,f.created_at,f.updated_at)) THEN
+       WHERE ROW(m.id,m.member_code,m.full_name,m.center_code,m.phone_mobile_normalized,m.created_at,m.updated_at,m.birth_date)
+       IS DISTINCT FROM ROW(f.id,f.member_code,f.full_name,f.center_code,f.phone_mobile_normalized,f.created_at,f.updated_at,f.birth_date)) THEN
     RAISE EXCEPTION 'Member fixture ownership/payload conflict; nothing overwritten';
   END IF;
   IF EXISTS (SELECT 1 FROM _rec_jobs f JOIN public.jobs j
@@ -97,10 +124,10 @@ BEGIN
   END IF;
 END $ownership$;
 
-INSERT INTO public.members(id,member_code,full_name,center_code,phone_mobile_normalized,created_at,updated_at)
- SELECT f.* FROM _rec_members f WHERE NOT EXISTS (SELECT 1 FROM public.members m WHERE m.id=f.id);
+INSERT INTO public.members(id,member_code,full_name,center_code,phone_mobile_normalized,created_at,updated_at,birth_date)
+ SELECT f.id,f.member_code,f.full_name,f.center_code,f.phone_mobile_normalized,f.created_at,f.updated_at,f.birth_date FROM _rec_members f WHERE NOT EXISTS (SELECT 1 FROM public.members m WHERE m.id=f.id);
 INSERT INTO public.jobs(id,job_code,title,summary,location_text,work_date_text,status,center_code,created_at,updated_at)
- SELECT f.* FROM _rec_jobs f WHERE NOT EXISTS (SELECT 1 FROM public.jobs j WHERE j.id=f.id);
+ SELECT f.id,f.job_code,f.title,f.summary,f.location_text,f.work_date_text,f.status,f.center_code,f.created_at,f.updated_at FROM _rec_jobs f WHERE NOT EXISTS (SELECT 1 FROM public.jobs j WHERE j.id=f.id);
 
 CREATE TEMP TABLE _rec_flags ON COMMIT DROP AS
  SELECT m.id AS member_id, j.id AS job_id, 'sumida'::text AS center_code,
@@ -118,14 +145,14 @@ BEGIN
   END IF;
 END $flags$;
 INSERT INTO public.job_recommendation_flags(member_id,job_id,center_code,is_recommended,recommendation_level,created_at,updated_at)
- SELECT f.* FROM _rec_flags f WHERE NOT EXISTS (SELECT 1 FROM public.job_recommendation_flags r
+ SELECT f.member_id,f.job_id,f.center_code,f.is_recommended,f.recommendation_level,f.created_at,f.updated_at FROM _rec_flags f WHERE NOT EXISTS (SELECT 1 FROM public.job_recommendation_flags r
   WHERE r.center_code=f.center_code AND r.job_id=f.job_id AND r.member_id=f.member_id);
 
 DO $verify$
 BEGIN
   IF EXISTS (SELECT 1 FROM _rec_members f WHERE NOT EXISTS (SELECT 1 FROM public.members m
-       WHERE ROW(m.id,m.member_code,m.full_name,m.center_code,m.phone_mobile_normalized,m.created_at,m.updated_at)
-       IS NOT DISTINCT FROM ROW(f.id,f.member_code,f.full_name,f.center_code,f.phone_mobile_normalized,f.created_at,f.updated_at)))
+       WHERE ROW(m.id,m.member_code,m.full_name,m.center_code,m.phone_mobile_normalized,m.created_at,m.updated_at,m.birth_date)
+       IS NOT DISTINCT FROM ROW(f.id,f.member_code,f.full_name,f.center_code,f.phone_mobile_normalized,f.created_at,f.updated_at,f.birth_date)))
      OR EXISTS (SELECT 1 FROM _rec_jobs f WHERE NOT EXISTS (SELECT 1 FROM public.jobs j
        WHERE ROW(j.id,j.job_code,j.title,j.summary,j.location_text,j.work_date_text,j.status,j.center_code,j.created_at,j.updated_at)
        IS NOT DISTINCT FROM ROW(f.id,f.job_code,f.title,f.summary,f.location_text,f.work_date_text,f.status,f.center_code,f.created_at,f.updated_at)))
