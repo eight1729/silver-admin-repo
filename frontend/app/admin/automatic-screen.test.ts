@@ -7,11 +7,12 @@ import ts from "typescript";
 import React from "react";
 import * as ordering from "./automatic-workflow.ts";
 import * as capability from "./send-capability.ts";
+import * as uiState from "./notification-ui-state.ts";
 import * as templates from "./notification-templates.ts";
 
 const require = createRequire(import.meta.url);
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
-function harness({ failTargets = false, restored = false } = {}) {
+function harness({ failTargets = false, restored = false, zero = false } = {}) {
   const states: any[] = [], refs: any[] = [], effects: any[] = [];
   let stateIndex = 0, refIndex = 0, effectIndex = 0;
   let queued: (() => void)[] = [];
@@ -27,7 +28,7 @@ function harness({ failTargets = false, restored = false } = {}) {
   const api = {
     jobs: async () => [job], lineSendMode: async () => cap,
     job: async () => job, candidates: async () => rows,
-    automaticSelection: async () => ({ selected_member_ids: ["b", "a"], reason: null }),
+    automaticSelection: async () => ({ selected_member_ids: zero ? [] : ["b", "a"], reason: zero ? "対象0人" : null }),
     createOperation: async (body: any) => { calls.push("create"); assert.equal(body.automatic_selection, true); op.message = body; return op; },
     operation: async () => op,
     updateTargets: async (_id: string, ids: string[]) => {
@@ -52,6 +53,7 @@ function harness({ failTargets = false, restored = false } = {}) {
         if (!old || deps.some((d, index) => d !== old[index])) { effects[i] = deps; queued.push(fn); } },
     },
     "../lib/admin-api": { adminApi: api, adminErrorMessage: () => "取得失敗" },
+    "./JobsNavigationGuard": { JobsNavigationGuard: "guard" }, "./notification-ui-state": uiState,
     "./AdminRouteFrame": { AdminRouteFrame: "frame" }, "./LoadingOverlay": { LoadingOverlay: "loading" },
     "./LowerPanels": { DeliverySummaryPanel: "results" },
     "./MajorPanels": { JobSelectionPanel: "jobs", CandidateSelectionPanel: "members", MessageEditorPanel: "editor" },
@@ -106,4 +108,14 @@ test("target-save failure retries the same operation and reload never restores a
   assert.ok(find(tree, node => node.type === "editor"));
   assert.equal(find(tree, node => node.type === "modal"), undefined);
   assert.deepEqual(restored.calls, []);
+});
+
+test("zero automatic targets stays at job selection without manual target editing or an operation", async () => {
+  const h = harness({ zero: true }); h.render(); await flush();
+  await find(h.render(), node => node.type === "jobs").props.select("JOB-1");
+  const tree = h.render();
+  assert.ok(find(tree, node => node.type === "jobs"));
+  assert.equal(find(tree, node => node.type === "members"), undefined);
+  assert.deepEqual(h.calls, []);
+  assert.equal(h.storage.size, 0);
 });

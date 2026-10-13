@@ -2,12 +2,14 @@
 import { useEffect, useRef, useState } from "react";
 import { adminApi, adminErrorMessage, type AdminCandidate, type AdminDeliveries, type AdminConfirmation, type AdminJobDetail,
   type AdminJobSummary, type AdminLineSendMode, type AdminMessage, type AdminOperation } from "../lib/admin-api";
+import { JobsNavigationGuard } from "./JobsNavigationGuard";
+import { messagesEqual, memberSelectionsEqual } from "./notification-ui-state";
 import { AdminRouteFrame } from "./AdminRouteFrame";
 import { DeliverySummaryPanel } from "./LowerPanels";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { CandidateSelectionPanel, JobSelectionPanel, MessageEditorPanel } from "./MajorPanels";
 import { Modal } from "../components/Modal";
-import { AUTO_OPERATION_KEY, notificationEntryUrl, orderAutomaticCandidates } from "./automatic-workflow";
+import { AUTO_OPERATION_KEY, notificationEntryUrl } from "./automatic-workflow";
 import { canAttemptSend, isLiveMode, safetyPrefix } from "./send-capability";
 import { createTemplateMessage, DEFAULT_CENTER_DISPLAY_NAME, replaceExactCenterName, replaceExactNotice, type SelectedTemplateId } from "./notification-templates";
 import type { CandidateFilterId } from "./candidate-filters";
@@ -160,7 +162,7 @@ export function AutomaticNotification({ initialJobId }: { initialJobId: string |
         summary: summary?.summary, workDays: summary?.work_days, workTime: summary?.work_time }, emptyMessage.note);
       const ids = new Set(choice.selected_member_ids);
       setJob(detail); setCandidates(rows); setSelected(ids); setMessage(body); setPhase("members");
-      if (!ids.size) { setError(choice.reason ?? "自動選択対象がいません。"); return; }
+      if (!ids.size) { setPhase("jobs"); setError(choice.reason ?? "自動選択対象がいません。"); return; }
       await persistAndValidate(detail, ids, body, new Set());
     } catch (e) { if (alive.current) setError(adminErrorMessage(e)); }
     finally { lock.current = false; if (alive.current) setBusy(false); }
@@ -198,13 +200,14 @@ export function AutomaticNotification({ initialJobId }: { initialJobId: string |
   }
 
   return <AdminRouteFrame title="通知作成：自動選択" description="初期選択は評価5・LINE連携済み・会員番号降順の最大100人です。">
+    <JobsNavigationGuard busy={loading || busy || operation?.status === "sending"} dirty={Boolean(job && (!operation || !messagesEqual(message, operation.message) || !memberSelectionsEqual(selected, operation.selected_member_ids ?? []) || notice.trim() !== appliedNotice.current || center.trim() !== appliedCenter.current))} />
     <LoadingOverlay active={loading || busy} />
     {error && <p className="admin-error" role="alert">{error}</p>}
     {!operation && <JobSelectionPanel jobs={jobs} selectedJobId={job?.job_id ?? null} selectedJob={job} loading={loading} error={jobsError} busy={busy}
       retry={() => void reloadJobs()} select={start} />}
     {job && phase === "members" && <>
       <p>選択済みを上部に表示します。除外者を戻す場合はチェックを一度解除して再選択してください。初期100人上限は編集後には適用されません。</p>
-      <CandidateSelectionPanel preserveOrder submitLabel="保存・再検証して最終確認へ" job={job} candidates={orderAutomaticCandidates(candidates, selected)} selected={selected}
+      <CandidateSelectionPanel submitLabel="保存・再検証して最終確認へ" job={job} candidates={candidates} selected={selected}
         notificationType="new_job_match" notificationTypeLocked setNotificationType={() => {}} filter={filter} setFilter={setFilter}
         toggle={(id) => { if (busy) return; const next = new Set(selected); if (next.has(id)) next.delete(id); else {
           next.add(id); if (excluded.current.has(id)) setReinclude(values => new Set([...values, id]));
@@ -228,7 +231,7 @@ export function AutomaticNotification({ initialJobId }: { initialJobId: string |
     {phase === "result" && <><p role="status">送信受付状態：{operation?.status}。送信を自動で繰り返しません。</p>
       <DeliverySummaryPanel operation={operation} deliveries={deliveries} loading={resultsLoading} error={resultsError} retry={refreshResults} />
       <button className="admin-button secondary" disabled={resultsLoading} onClick={() => void refreshResults()}>配信結果を更新</button></>}
-    {pendingEntry && <Modal title="選択した求人で新しい通知を作成しますか？" onClose={() => { setPendingEntry(null); window.history.replaceState(null, "", notificationEntryUrl("auto", job?.job_id)); }} footer={<>
+    {pendingEntry && <Modal placement="center" title="選択した求人で新しい通知を作成しますか？" onClose={() => { setPendingEntry(null); window.history.replaceState(null, "", notificationEntryUrl("auto", job?.job_id)); }} footer={<>
       <button className="admin-button secondary" onClick={() => { setPendingEntry(null); window.history.replaceState(null, "", notificationEntryUrl("auto", job?.job_id)); }}>保存済み通知へ戻る</button>
       <button className="admin-button" onClick={() => { sessionStorage.removeItem(AUTO_OPERATION_KEY); window.location.assign(notificationEntryUrl("auto", pendingEntry)); }}>選択した求人で作成</button>
     </>}><p>保存済み通知は削除しません。求人一覧で選んだ求人へ切り替え、新しい通知を作成します。</p></Modal>}

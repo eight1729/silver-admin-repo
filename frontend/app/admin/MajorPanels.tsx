@@ -1,5 +1,6 @@
 import { JobDateFilter } from "./JobDateFilter";
 import { filterRegisteredJobs, formatJobRegistration } from "./job-registration";
+import { pageWindow } from "./page-window";
 import { orderCandidates } from "./candidate-order";
 import { canAttemptSend, isLiveMode, modePresentation, safetyPrefix, sendWarning } from "./send-capability";
 import { useEffect, useRef, useState } from "react";
@@ -61,8 +62,7 @@ export function JobSelectionPanel({ jobs, selectedJobId, selectedJob, loading, e
   </div>;
 }
 
-export function CandidateSelectionPanel({ preserveOrder = false, submitLabel, job, candidates, selected, notificationType, notificationTypeLocked, setNotificationType, toggle, begin, busy, error, retry, targetsPending, maxRecipients, editable, filter, setFilter }: {
-  preserveOrder?: boolean;
+export function CandidateSelectionPanel({ submitLabel, job, candidates, selected, notificationType, notificationTypeLocked, setNotificationType, toggle, begin, busy, error, retry, targetsPending, maxRecipients, editable, filter, setFilter }: {
   submitLabel?: string;
   job: AdminJobDetail;
   candidates: AdminCandidate[];
@@ -81,6 +81,13 @@ export function CandidateSelectionPanel({ preserveOrder = false, submitLabel, jo
   filter: CandidateFilterId;
   setFilter: (value: CandidateFilterId) => void;
 }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const pendingFocus = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pendingFocus.current) return;
+    Array.from(panel.current?.querySelectorAll<HTMLInputElement>("input[data-member-id]") ?? []).find(input => input.dataset.memberId === pendingFocus.current)?.focus();
+    pendingFocus.current = null;
+  }, [selected]);
   const singleRecipient = maxRecipients === 1;
   const pageSize = 5;
   const [page, setPage] = useState(1);
@@ -88,31 +95,41 @@ export function CandidateSelectionPanel({ preserveOrder = false, submitLabel, jo
   useEffect(() => { setFilter("all"); setMinimumMemberNumber(""); setPage(1); }, [job.job_id, setFilter]);
   useEffect(() => setPage(1), [filter, minimumMemberNumber]);
   const invalidMinimum = minimumMemberNumber !== "" && !isMemberNumber(minimumMemberNumber);
-  const visibleCandidates = filterCandidates(preserveOrder ? candidates : orderCandidates(candidates), filter, minimumMemberNumber);
+  const visibleCandidates = filterCandidates(orderCandidates(candidates, selected), filter, minimumMemberNumber);
   const totalPages = Math.max(1, Math.ceil(visibleCandidates.length / pageSize));
-  const currentPage = Math.min(page, totalPages);
+  const window = pageWindow(page, totalPages);
+  const currentPage = window.current;
+  useEffect(() => setPage(value => pageWindow(value, totalPages).current), [totalPages]);
   const pageCandidates = visibleCandidates.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const hiddenSelected = candidates.filter((candidate) => selected.has(candidate.member_id) && !visibleCandidates.some((visible) => visible.member_id === candidate.member_id));
-  return <div className="major-panel-content">
+  function toggleAndFollow(id: string) {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    const index = filterCandidates(orderCandidates(candidates, next), filter, minimumMemberNumber).findIndex(c => c.member_id === id);
+    if (index >= 0) setPage(Math.floor(index / pageSize) + 1);
+    pendingFocus.current = id;
+    toggle(id);
+  }
+  return <div className="major-panel-content" ref={panel}>
     <label className="candidate-number-filter">会員番号（以上）<input type="text" inputMode="numeric" value={minimumMemberNumber} aria-invalid={invalidMinimum} aria-describedby="candidate-number-help" onChange={(event) => setMinimumMemberNumber(event.target.value)} /></label>
     <p id="candidate-number-help" className={invalidMinimum ? "field-help-error" : "candidate-limit-note"}>{invalidMinimum ? "半角数字で入力してください。" : "指定時は番号未取得・数字以外の会員を表示しません。選択済み会員は解除されません。"}</p>
     {busy && candidates.length === 0 && <div className="admin-info" role="status">候補会員を読み込んでいます。</div>}
     {error && <div className="admin-error" role="alert"><p>候補会員を取得できませんでした。</p><button className="admin-button secondary" type="button" disabled={busy} onClick={() => void retry()}>候補会員を再読み込み</button></div>}
     {!busy && !error && candidates.length === 0 && <div className="admin-panel-empty">この求人に表示できる候補会員はいません。</div>}
-    {hiddenSelected.length > 0 && <div className="admin-info" role="status"><p>選択中の会員は現在の絞り込み結果には表示されていません。</p><ul>{hiddenSelected.map((candidate) => <li key={candidate.member_id}>{candidate.display_name}</li>)}</ul></div>}
+    {hiddenSelected.length > 0 && <details className="admin-info hidden-selected"><summary>現在の絞り込み結果に表示されていない選択済み会員: {hiddenSelected.length}人</summary><ul>{hiddenSelected.map((candidate) => <li key={candidate.member_id}>{candidate.member_number ?? "未取得"}・{candidate.display_name}</li>)}</ul></details>}
     {candidates.length > 0 && visibleCandidates.length === 0 && <div className="admin-panel-empty">現在の条件に一致する候補会員はいません。</div>}
-    {pageCandidates.length > 0 && <div className="candidate-table-wrapper"><table className="candidate-selection-table"><colgroup><col className="candidate-select-column"/><col className="candidate-id-column"/><col className="candidate-name-column"/><col className="candidate-preference-column"/><col className="candidate-line-column"/><col className="candidate-eligible-column"/></colgroup><thead><tr><th scope="col"><span className="sr-only">選択</span></th><th scope="col">会員ID</th><th scope="col">氏名</th><th scope="col">希望条件</th><th scope="col">LINE連携</th><th scope="col">通知可否</th></tr></thead><tbody>
+    {pageCandidates.length > 0 && <div className="candidate-table-wrapper"><table className="candidate-selection-table"><colgroup><col className="candidate-select-column"/><col className="candidate-id-column"/><col className="candidate-name-column"/><col className="candidate-level-column"/><col className="candidate-preference-column"/><col className="candidate-line-column"/><col className="candidate-eligible-column"/></colgroup><thead><tr><th scope="col"><span className="sr-only">選択</span></th><th scope="col">会員番号</th><th scope="col">氏名</th><th scope="col">おすすめレベル</th><th scope="col">希望条件</th><th scope="col">LINE連携</th><th scope="col">通知可否</th></tr></thead><tbody>
       {pageCandidates.map((candidate) => {
         const isSelected = selected.has(candidate.member_id);
         const limitReached = maxRecipients != null && selected.size >= maxRecipients && !isSelected;
         const disabled = !editable || (!candidate.eligible && !isSelected) || limitReached || busy;
-        return <tr className={`${isSelected ? "is-selected" : ""}${disabled && !isSelected ? " is-disabled" : ""}`} key={candidate.member_id} onClick={() => { if (!disabled) toggle(candidate.member_id); }}>
-          <td><input type="checkbox" name="admin-selected-candidate" checked={isSelected} disabled={disabled} aria-label={`${candidate.display_name}を選択`} aria-describedby={`candidate-state-${candidate.member_id}`} onClick={(event) => event.stopPropagation()} onChange={() => { if (!disabled) toggle(candidate.member_id); }}/></td>
-          <th scope="row">{candidate.member_number ?? (preserveOrder ? "未取得" : candidate.member_id)}</th><td>{candidate.display_name || "—"}</td><td><span className="candidate-preference-clamp">{candidate.preference_summary || "—"}</span></td><td><span className={`candidate-state-badge ${candidate.line_linked ? "is-positive" : "is-neutral"}`}>{candidate.linkage_unknown ? "未確認" : candidate.line_linked ? "連携済み" : "未連携"}</span></td><td><span id={`candidate-state-${candidate.member_id}`} className={`candidate-state-badge ${candidate.eligible ? "is-positive" : "is-negative"}`}>{candidate.eligible ? "通知可能" : "通知不可"}</span>{candidate.reason && <span className="sr-only">{safeReasonLabel(candidate.reason)}</span>}{limitReached && <span className="sr-only">選択上限に達しています</span>}</td>
+        return <tr className={`${isSelected ? "is-selected" : ""}${disabled && !isSelected ? " is-disabled" : ""}`} key={candidate.member_id} onClick={() => { if (!disabled) toggleAndFollow(candidate.member_id); }}>
+          <td><input type="checkbox" name="admin-selected-candidate" data-member-id={candidate.member_id} checked={isSelected} disabled={disabled} aria-label={`${candidate.display_name}を選択`} aria-describedby={`candidate-state-${candidate.member_id}`} onClick={(event) => event.stopPropagation()} onChange={() => { if (!disabled) toggleAndFollow(candidate.member_id); }}/></td>
+          <th scope="row">{candidate.member_number ?? "未取得"}</th><td>{candidate.display_name || "—"}</td><td>{candidate.recommendation_level ?? "未評価"}</td><td><span className="candidate-preference-clamp">{candidate.preference_summary || "—"}</span></td><td><span className={`candidate-state-badge ${candidate.line_linked ? "is-positive" : "is-neutral"}`}>{candidate.linkage_unknown ? "未確認" : candidate.line_linked ? "連携済み" : "未連携"}</span></td><td><span id={`candidate-state-${candidate.member_id}`} className={`candidate-state-badge ${candidate.eligible ? "is-positive" : "is-negative"}`}>{candidate.eligible ? "通知可能" : "通知不可"}</span>{candidate.reason && <span className="sr-only">{safeReasonLabel(candidate.reason)}</span>}{limitReached && <span className="sr-only">選択上限に達しています</span>}</td>
         </tr>;
       })}
     </tbody></table></div>}
-    {visibleCandidates.length > 0 && <div className="candidate-pagination" aria-label="候補会員のページ切り替え"><span>{(currentPage - 1) * pageSize + 1}〜{Math.min(currentPage * pageSize, visibleCandidates.length)} / {visibleCandidates.length}件</span><div><button type="button" className="admin-button secondary compact" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>前へ</button>{Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => <button type="button" className={`candidate-page-button${pageNumber === currentPage ? " is-current" : ""}`} aria-current={pageNumber === currentPage ? "page" : undefined} onClick={() => setPage(pageNumber)} key={pageNumber}>{pageNumber}</button>)}<button type="button" className="admin-button secondary compact" disabled={currentPage === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>次へ</button></div></div>}
+    {visibleCandidates.length > 0 && <div className="candidate-pagination" aria-label="候補会員のページ切り替え"><span>{(currentPage - 1) * pageSize + 1}〜{Math.min(currentPage * pageSize, visibleCandidates.length)} / {visibleCandidates.length}件</span><div><button type="button" className="admin-button secondary compact" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>前へ</button>{window.before && <span aria-label="前のページを省略">…</span>}{window.pages.map((pageNumber) => <button type="button" className={`candidate-page-button${pageNumber === currentPage ? " is-current" : ""}`} aria-current={pageNumber === currentPage ? "page" : undefined} onClick={() => setPage(pageNumber)} key={pageNumber}>{pageNumber}</button>)}{window.after && <span aria-label="後のページを省略">…</span>}<button type="button" className="admin-button secondary compact" disabled={currentPage === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>次へ</button></div></div>}
     <div className="candidate-list-link-row"><a className="admin-link" href={`/admin/members?jobId=${encodeURIComponent(job.job_id)}`}>会員一覧へ <span aria-hidden="true">↗</span></a></div>
     {editable && <><div className="candidate-footer-actions"><label><span>通知種別</span><select value={notificationType} disabled={notificationTypeLocked || busy} onChange={(event) => { if (!notificationTypeLocked && !busy) setNotificationType(event.target.value as NotificationType); }}><option value="new_job_match">新着求人マッチ</option><option value="existing_job_match">既存求人マッチ</option><option value="custom_job">個別求人</option></select></label><button className="admin-button candidate-primary-compact" type="button" disabled={busy || selected.size === 0 || (maxRecipients != null && selected.size > maxRecipients) || job.status !== "published"} onClick={() => void begin()}>{busy ? "対象を保存中…" : targetsPending ? "対象会員の保存を再試行" : submitLabel ?? "対象を保存して通知文編集へ"}</button></div>
       {targetsPending && <div className="admin-info" role="status">operationは作成済みです。対象会員の保存を再試行してください。</div>}

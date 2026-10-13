@@ -5,13 +5,14 @@ import { useEffect, useId, useRef } from "react";
 import { color, font, shadow, space } from "../design/tokens";
 
 type ModalProps = {
+  placement?: "sheet" | "center";
   title: string;
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
 };
 
-export function Modal({ title, onClose, children, footer }: ModalProps) {
+export function Modal({ title, onClose, children, footer, placement = "sheet" }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const descriptionId = useId();
@@ -57,7 +58,9 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
         inset: 0,
         background: color.overlay,
         display: "flex",
-        alignItems: "flex-end",
+        alignItems: placement === "center" ? "center" : "flex-end",
+        padding: placement === "center" ? "16px" : 0,
+        boxSizing: "border-box",
         justifyContent: "center",
         zIndex: 1000,
       }}
@@ -71,7 +74,7 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
         ref={dialogRef}
         style={{
           background: color.surface,
-          borderRadius: "20px 20px 0 0",
+          borderRadius: placement === "center" ? "20px" : "20px 20px 0 0",
           width: "100%",
           maxWidth: "540px",
           maxHeight: "90vh",

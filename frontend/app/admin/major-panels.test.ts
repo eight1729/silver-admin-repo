@@ -42,7 +42,7 @@ test("staging candidate selection visibly enforces one recipient", async () => {
   assert.match(text, /連携済み/);
   assert.match(text, /通知可能/);
   assert.match(candidatePanel, /<table className="candidate-selection-table">/);
-  for (const heading of ["会員ID", "氏名", "希望条件", "LINE連携", "通知可否"]) assert.match(candidatePanel, new RegExp(`<th scope="col">${heading}</th>`));
+  for (const heading of ["会員番号", "氏名", "希望条件", "LINE連携", "通知可否"]) assert.match(candidatePanel, new RegExp(`<th scope="col">${heading}</th>`));
   assert.match(candidatePanel, /type="checkbox"/);
   assert.match(candidatePanel, /name="admin-selected-candidate"/);
   assert.match(candidatePanel, /candidate\.preference_summary/);

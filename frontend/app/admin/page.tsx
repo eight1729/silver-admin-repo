@@ -12,7 +12,7 @@ import {
   type AdminJobDetail, type AdminJobSummary, type AdminMessage,
   type AdminLineSendMode, type AdminOperation, type AdminValidation, type NotificationType,
 } from "../lib/admin-api";
-import { ADMIN_HOME_EVENT } from "./AdminHomeButton";
+import { JobsNavigationGuard } from "./JobsNavigationGuard";
 import { createDeliveryRefresh } from "./delivery-refresh";
 import { jobStatusLabel } from "./job-status";
 import { toggleCandidateSelection } from "./candidate-selection";
@@ -267,11 +267,6 @@ function ManualAdminPage({ initialJobId }: { initialJobId: string | null }) {
     sessionStorage.removeItem(STORAGE_KEY); sessionStorage.removeItem(SELECTED_KEY);
   }
 
-  useEffect(() => {
-    const handler = () => returnToJobs();
-    window.addEventListener(ADMIN_HOME_EVENT, handler);
-    return () => window.removeEventListener(ADMIN_HOME_EVENT, handler);
-  }, [returnToJobs]);
 
   function requestJobSelection(jobId: string) {
     if (jobId === selectedJobId || busy || workflowAction === "sending") return;
@@ -494,7 +489,7 @@ function ManualAdminPage({ initialJobId }: { initialJobId: string | null }) {
   }
 
   const overlayActive = loading || modeLoading || restoringOperation || busy;
-  return <><LoadingOverlay active={overlayActive} /><AdminShell mode={lineSendMode}><main className="admin-main">
+  return <><JobsNavigationGuard busy={overlayActive || workflowAction === "sending" || operation?.status === "sending"} dirty={Boolean(job && (!operation || !messagesEqual(message, operation.message) || !memberSelectionsEqual(selected, operation.selected_member_ids ?? []) || centerDisplayNameDraft.trim() !== centerDisplayName || noticeDraft.trim() !== appliedNotice))} /><LoadingOverlay active={overlayActive} /><AdminShell mode={lineSendMode}><main className="admin-main">
     <div className="sr-status" aria-live="polite">{loading || busy ? "処理中です…" : ""}</div>
     {error && <div className="admin-error" role="alert">{error}</div>}
     {success && <div className="admin-success" role="status">{success}</div>}
@@ -507,6 +502,7 @@ function ManualAdminPage({ initialJobId }: { initialJobId: string | null }) {
     </AdminPanel>
     <AdminPanel number={2} title="対象候補会員" badge={job ? `${job.title}・${candidates.length}人` : undefined} actions={job ? <CandidateFilterMenu value={candidateFilter} onChange={setCandidateFilter} /> : undefined}>
       {!selectedJobId ? <p className="admin-panel-empty">求人を選択すると、通知候補会員を読み込みます。</p> : !job ? <div className={detailError ? "admin-error" : "admin-info"} role={detailError ? "alert" : "status"}>{detailError ? <><p>選択求人の詳細を取得できませんでした。</p><button className="admin-button secondary" disabled={busy} onClick={() => void retryDetail()}>求人詳細を再読み込み</button></> : "選択求人を読み込んでいます。"}</div> : <CandidateSelectionPanel job={job} candidates={candidates} selected={selected} notificationType={operation?.notification_type ?? notificationType} notificationTypeLocked={operation !== null} setNotificationType={changeNotificationType} toggle={toggle} begin={beginOperation} busy={busy} error={candidatesError} retry={retryCandidates} targetsPending={targetsPending} maxRecipients={lineSendMode?.max_recipients ?? null} editable={step === "detail" && !workflowState.terminal} filter={candidateFilter} setFilter={setCandidateFilter} />}
+      {job && operation && <div className="candidate-edit-actions"><button className="admin-button secondary" disabled={busy || workflowAction === "sending" || workflowState.terminal || !["draft", "ready"].includes(operation.status) || Boolean(operation.send_requested_at)} onClick={() => { setValidationSnapshot(null); setValidationInvalidation("対象会員の編集後は再検証してください。"); setStep("detail"); }}>対象会員編集</button></div>}
     </AdminPanel>
     </div>
     <AdminPanel number={3} title="通知文編集" badge={job?.title} status={workflowState.state === "stale" ? "再検証が必要" : step === "edit" ? "現在の操作" : operation ? "下書きあり" : "未準備"}>
@@ -526,7 +522,7 @@ function ManualAdminPage({ initialJobId }: { initialJobId: string | null }) {
     </div>
     </div>
     {pendingTemplate && <Modal title="通知テンプレートを変更しますか？" onClose={() => setPendingTemplate(null)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setPendingTemplate(null)}>キャンセル</button><button className="admin-button" type="button" onClick={() => commitTemplate(pendingTemplate)}>テンプレートを適用</button></>}><p>現在の通知本文は、選択したテンプレートの内容で置き換えられます。</p></Modal>}
-    {pendingJobId && <Modal title="求人を変更しますか？" onClose={() => setPendingJobId(null)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setPendingJobId(null)}>キャンセル</button><button className="admin-button danger" type="button" onClick={() => void switchToJob(pendingJobId)}>求人を変更する</button></>}><p>求人を変更すると、現在の通知本文、対象会員、検証結果は破棄されます。保存済みの旧通知履歴は削除されません。</p></Modal>}
+    {pendingJobId && <Modal placement="center" title="求人を変更しますか？" onClose={() => setPendingJobId(null)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setPendingJobId(null)}>キャンセル</button><button className="admin-button danger" type="button" onClick={() => void switchToJob(pendingJobId)}>求人を変更する</button></>}><p>求人を変更すると、現在の通知本文、対象会員、検証結果は破棄されます。保存済みの旧通知履歴は削除されません。</p></Modal>}
   </main></AdminShell></>;
 }
 

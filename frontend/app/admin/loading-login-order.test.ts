@@ -73,11 +73,11 @@ test("display ordering preserves identifiers, ties, missing-number order and inp
     { member_id: "uuid-2", member_number: "0002" }, { member_id: "uuid-tie", member_number: "0001" }];
   const before = [...rows];
   const ordered = orderCandidates(rows);
-  assert.deepEqual(ordered.map(r => r.member_id), ["uuid-1", "uuid-tie", "uuid-2", "uuid-3", "external-a", "external-b"]);
+  assert.deepEqual(ordered.map(r => r.member_id), ["uuid-3", "uuid-2", "uuid-1", "uuid-tie", "external-a", "external-b"]);
   assert.deepEqual(rows, before);
-  assert.equal(ordered[0], rows[2]);
+  assert.equal(ordered[0], rows[0]);
   assert.deepEqual(orderCandidates(rows.filter(r => r.member_number == null)).map(r => r.member_id), ["external-a", "external-b"]);
-  assert.match(read("./MajorPanels.tsx"), /filterCandidates\(preserveOrder \? candidates : orderCandidates\(candidates\), filter, minimumMemberNumber\)/);
+  assert.match(read("./MajorPanels.tsx"), /filterCandidates\(orderCandidates\(candidates, selected\), filter, minimumMemberNumber\)/);
   assert.match(read("./members/page.tsx"), /orderCandidates\(candidates\)\.map/);
 });
 
