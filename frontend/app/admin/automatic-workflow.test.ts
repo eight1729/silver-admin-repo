@@ -29,13 +29,13 @@ test("editing order is selected first then level then exact numeric number then 
 
 test("persisted operation, automatic validation, token send, and explicit exclusions are wired", () => {
   const source = readFileSync(new URL("./AutomaticNotification.tsx", import.meta.url), "utf8");
-  const create = source.indexOf("await adminApi.createOperation");
+  const create = source.indexOf("adminApi.createOperation");
   const store = source.indexOf("storeOperation(op)", create);
-  const targets = source.indexOf("await adminApi.updateTargets", store);
-  const save = source.indexOf("await adminApi.updateOperation", targets);
-  const validate = source.indexOf("await adminApi.validate", save);
+  const targets = source.indexOf("adminApi.updateTargets", store);
+  const save = source.indexOf("adminApi.updateOperation", targets);
+  const validate = source.indexOf("adminApi.validate", save);
   assert.ok(create < store && store < targets && targets < save && save < validate);
-  assert.match(source, /adminApi.send\(confirmation.operation_id, confirmation.confirmation_token\)/);
+  assert.match(source, /adminApi.send\(confirmation.operation_id, confirmationToken\)/);
   assert.match(source, /if \(!confirmation\?\.confirmation_token \|\| !canSend \|\| lock.current\) return/);
   assert.match(source, /setConfirmation\(null\)/);
   assert.match(source, /new Set\(restoredIds\)/);

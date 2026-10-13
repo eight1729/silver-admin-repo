@@ -31,7 +31,7 @@ export default function AdminJobsPage() {
   }
   useEffect(() => { load(); return () => request.current?.abort(); }, []);
   return <AdminRouteFrame title="求人一覧" description="業務システムから取得した求人を参照専用で表示します。">
-    <LoadingOverlay active={loading} />
+    <LoadingOverlay active={loading} status="求人一覧を取得中…" />
     <JobDateFilter value={registeredFrom} onChange={setRegisteredFrom} />
     {loading && <div className="admin-info" role="status">求人を読み込んでいます。</div>}
     {error && <div className="admin-error" role="alert"><p>{error}</p><button className="admin-button secondary" type="button" onClick={load}>再読み込み</button></div>}

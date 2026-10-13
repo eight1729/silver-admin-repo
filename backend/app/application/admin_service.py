@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.core.jobs_diagnostics import jobs_point, jobs_failure
+from app.core.jobs_diagnostics import jobs_failure
 from app.application.automatic_selection import automatic_context, confirmation_identity, select_automatic_members
 
 from dataclasses import dataclass
@@ -158,7 +158,6 @@ class AdminApplicationService:
 
     async def list_jobs(self, service_id: str) -> tuple[ExternalJobSummary, ...]:
         stage = "list_jobs_scope"
-        jobs_point("admin_application", "list_jobs_start")
         try:
             scope = self._business_scope(service_id)
             stage = "list_jobs_provider"
@@ -206,7 +205,6 @@ class AdminApplicationService:
                 item.created_at or datetime.min.replace(tzinfo=timezone.utc),
             ), reverse=True)
             items = tuple(collected)
-            jobs_point("admin_application", "list_jobs_complete")
             return items
         except Exception as exc:
             jobs_failure("admin_application", stage, exc)

@@ -6,6 +6,7 @@ import { JobsNavigationGuard } from "./JobsNavigationGuard";
 import { messagesEqual, memberSelectionsEqual } from "./notification-ui-state";
 import { AdminRouteFrame } from "./AdminRouteFrame";
 import { DeliverySummaryPanel } from "./LowerPanels";
+import { useLoadingTasks } from "./use-loading-tasks";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { CandidateSelectionPanel, JobSelectionPanel, MessageEditorPanel } from "./MajorPanels";
 import { Modal } from "../components/Modal";
@@ -16,7 +17,8 @@ import type { CandidateFilterId } from "./candidate-filters";
 
 const emptyMessage = { greeting: "こんにちは。", introduction: "おすすめの求人をご案内します。", note: "内容をご確認ください。" };
 
-export function AutomaticNotification({ initialJobId }: { initialJobId: string | null }) {
+export function AutomaticNotification({ initialJobId, resumeOperationId = null }: { initialJobId: string | null; resumeOperationId?: string | null }) {
+  const { status: loadingStatus, track } = useLoadingTasks();
   const [jobs, setJobs] = useState<AdminJobSummary[]>([]);
   const [job, setJob] = useState<AdminJobDetail | null>(null);
   const [candidates, setCandidates] = useState<AdminCandidate[]>([]);
@@ -55,6 +57,7 @@ export function AutomaticNotification({ initialJobId }: { initialJobId: string |
     operationRef.current = value;
     if (alive.current) setOperation(value);
     sessionStorage.setItem(AUTO_OPERATION_KEY, value.operation_id); // ID only, never display attributes.
+    if (alive.current) window.history.replaceState(null, "", notificationEntryUrl("auto", null, value.operation_id));
   }
   function retainMissing(rows: AdminCandidate[], saved: AdminConfirmation) {
     const known = new Set(rows.map(c => c.member_id));
@@ -64,7 +67,7 @@ export function AutomaticNotification({ initialJobId }: { initialJobId: string |
     }))];
   }
   async function reloadJobs() {
-    try { setJobs(await adminApi.jobs()); setJobsError(false); }
+    try { setJobs(await track("求人一覧を取得中…", () => adminApi.jobs())); setJobsError(false); }
     catch (e) { setJobsError(true); setError(adminErrorMessage(e)); }
   }
   useEffect(() => {
@@ -73,18 +76,18 @@ export function AutomaticNotification({ initialJobId }: { initialJobId: string |
     const signal = controller.signal;
     void (async () => {
       try {
-        const [allJobs, cap] = await Promise.all([adminApi.jobs(signal), adminApi.lineSendMode(signal)]);
+        const [allJobs, cap] = await Promise.all([track("求人一覧を取得中…", () => adminApi.jobs(signal)), track("送信設定を確認中…", () => adminApi.lineSendMode(signal))]);
         if (signal.aborted) return;
         setJobs(allJobs); setCapability(cap);
-        const id = sessionStorage.getItem(AUTO_OPERATION_KEY);
+        const id = resumeOperationId;
         if (id) {
-          const saved = await adminApi.operation(id, signal);
+          const saved = await track("通知の状態を取得中…", () => adminApi.operation(id, signal));
           if (!saved.automatic_selection) throw new Error("invalid automatic context");
-          const [detail, rows, view] = await Promise.all([adminApi.job(saved.job_id, signal), adminApi.candidates(saved.job_id, signal), adminApi.confirmation(id, signal)]);
+          const [detail, rows, view] = await Promise.all([track("求人詳細を取得中…", () => adminApi.job(saved.job_id, signal)), track("候補会員とLINE連携状態を確認中…", () => adminApi.candidates(saved.job_id, signal)), track("送信前の確認情報を取得中…", () => adminApi.confirmation(id, signal))]);
           if (signal.aborted) return;
           storeOperation(saved); setJob(detail); setCandidates(retainMissing(rows, view));
           const restoredIds = saved.target_count === 0 && !saved.send_requested_at
-            ? (await adminApi.automaticSelection(saved.job_id, signal)).selected_member_ids : saved.selected_member_ids;
+            ? (await track("自動選択の対象会員を確認中…", () => adminApi.automaticSelection(saved.job_id, signal))).selected_member_ids : saved.selected_member_ids;
           if (signal.aborted) return;
           setSelected(new Set(restoredIds)); setMessage(saved.message); setNotice(saved.message.note);
           setTemplate("custom"); setSelectedLimit(view.selected_recipient_limit); appliedNotice.current = saved.message.note; excluded.current = new Set(view.targets.filter(t => t.disposition !== "send").map(t => t.member_id));
@@ -119,7 +122,7 @@ export function AutomaticNotification({ initialJobId }: { initialJobId: string |
     if (!saved) return;
     setResultsLoading(true); setResultsError("");
     try {
-      const [current, result] = await Promise.all([adminApi.operation(saved.operation_id), adminApi.deliveries(saved.operation_id)]);
+      const [current, result] = await Promise.all([track("通知の状態を取得中…", () => adminApi.operation(saved.operation_id)), track("送信結果を取得中…", () => adminApi.deliveries(saved.operation_id))]);
       if (alive.current) { storeOperation(current); setDeliveries(result); }
     } catch (e) { if (alive.current) setResultsError(adminErrorMessage(e)); }
     finally { if (alive.current) setResultsLoading(false); }
@@ -134,14 +137,14 @@ export function AutomaticNotification({ initialJobId }: { initialJobId: string |
     if (!ids.size || detail.status !== "published") throw new Error("no sendable selection");
     let op = operationRef.current;
     if (!op) {
-      op = await adminApi.createOperation({ job_id: detail.job_id, notification_type: "new_job_match", automatic_selection: true, ...body });
+      op = await track("通知を作成中…", () => adminApi.createOperation({ job_id: detail.job_id, notification_type: "new_job_match", automatic_selection: true, ...body }));
       storeOperation(op); // Keep partial success so retry never creates another operation.
     }
-    await adminApi.updateTargets(op.operation_id, [...ids], [...explicit].filter(id => ids.has(id)));
-    await adminApi.updateOperation(op.operation_id, body);
-    await adminApi.validate(op.operation_id);
+    await track("対象会員を保存中…", () => adminApi.updateTargets(op.operation_id, [...ids], [...explicit].filter(id => ids.has(id))));
+    await track("通知文を保存中…", () => adminApi.updateOperation(op.operation_id, body));
+    await track("送信前の検証中…", () => adminApi.validate(op.operation_id));
     const [current, view, cap, targetLink] = await Promise.all([
-      adminApi.operation(op.operation_id), adminApi.confirmation(op.operation_id), adminApi.lineSendMode(), adminApi.notificationLink(detail.job_id),
+      track("通知の状態を取得中…", () => adminApi.operation(op.operation_id)), track("送信前の確認情報を取得中…", () => adminApi.confirmation(op.operation_id)), track("送信設定を確認中…", () => adminApi.lineSendMode()), track("求人リンクを取得中…", () => adminApi.notificationLink(detail.job_id)),
     ]);
     if (!alive.current) return;
     storeOperation(current); setConfirmation(view); setSelectedLimit(view.selected_recipient_limit); setCapability(cap); setLink(targetLink.url);
@@ -154,7 +157,7 @@ export function AutomaticNotification({ initialJobId }: { initialJobId: string |
     if (lock.current || operationRef.current) return;
     lock.current = true; setBusy(true); setError(""); setConfirmation(null);
     try {
-      const [detail, rows, choice] = await Promise.all([adminApi.job(id), adminApi.candidates(id), adminApi.automaticSelection(id)]);
+      const [detail, rows, choice] = await Promise.all([track("求人詳細を取得中…", () => adminApi.job(id)), track("候補会員とLINE連携状態を確認中…", () => adminApi.candidates(id)), track("自動選択の対象会員を確認中…", () => adminApi.automaticSelection(id))]);
       if (!alive.current) return;
       if (detail.status !== "published") throw new Error("job is not published");
       const summary = jobs.find(j => j.job_id === id);
@@ -184,24 +187,25 @@ export function AutomaticNotification({ initialJobId }: { initialJobId: string |
     && canAttemptSend(capability, confirmation.sendable_count) && (!isLiveMode(capability) || link) && !busy);
   async function send() {
     if (!confirmation?.confirmation_token || !canSend || lock.current) return;
+    const confirmationToken = confirmation.confirmation_token;
     lock.current = true; setBusy(true); setError("");
     try {
-      const sent = await adminApi.send(confirmation.operation_id, confirmation.confirmation_token);
+      const sent = await track("通知を送信中…", () => adminApi.send(confirmation.operation_id, confirmationToken));
       storeOperation(sent); setOpen(false); setConfirmation(null); setPhase("result");
     } catch (e) {
       setOpen(false); setConfirmation(null); setPhase("message");
       setError(`${adminErrorMessage(e)} 送信結果を確認し、未送信の場合だけ再検証してください。`);
       // A network error may follow an accepted reservation. Read before offering another send.
       try {
-        const current = await adminApi.operation(confirmation.operation_id); storeOperation(current);
+        const current = await track("通知の状態を取得中…", () => adminApi.operation(confirmation.operation_id)); storeOperation(current);
         if (current.send_requested_at || ["sending", "completed", "completed_with_errors"].includes(current.status)) setPhase("result");
       } catch { /* Token remains discarded. No automatic resend. */ }
     } finally { lock.current = false; if (alive.current) setBusy(false); }
   }
 
   return <AdminRouteFrame title="通知作成：自動選択" description="初期選択は評価5・LINE連携済み・会員番号降順の最大100人です。">
-    <JobsNavigationGuard busy={loading || busy || operation?.status === "sending"} dirty={Boolean(job && (!operation || !messagesEqual(message, operation.message) || !memberSelectionsEqual(selected, operation.selected_member_ids ?? []) || notice.trim() !== appliedNotice.current || center.trim() !== appliedCenter.current))} />
-    <LoadingOverlay active={loading || busy} />
+    <JobsNavigationGuard busy={loading || busy || loadingStatus !== null || operation?.status === "sending"} dirty={Boolean(job && (!operation || !messagesEqual(message, operation.message) || !memberSelectionsEqual(selected, operation.selected_member_ids ?? []) || notice.trim() !== appliedNotice.current || center.trim() !== appliedCenter.current))} />
+    <LoadingOverlay active={loading || busy || loadingStatus !== null} status={loadingStatus ?? "通知作成を準備中…"} />
     {error && <p className="admin-error" role="alert">{error}</p>}
     {!operation && <JobSelectionPanel jobs={jobs} selectedJobId={job?.job_id ?? null} selectedJob={job} loading={loading} error={jobsError} busy={busy}
       retry={() => void reloadJobs()} select={start} />}
@@ -212,7 +216,7 @@ export function AutomaticNotification({ initialJobId }: { initialJobId: string |
         toggle={(id) => { if (busy) return; const next = new Set(selected); if (next.has(id)) next.delete(id); else {
           next.add(id); if (excluded.current.has(id)) setReinclude(values => new Set([...values, id]));
         } setSelected(next); setConfirmation(null); }}
-        begin={saveAndReview} busy={busy} error={false} retry={async () => setCandidates(await adminApi.candidates(job.job_id))}
+        begin={saveAndReview} busy={busy} error={false} retry={async () => setCandidates(await track("候補会員とLINE連携状態を確認中…", () => adminApi.candidates(job.job_id)))}
         targetsPending={Boolean(operation)} maxRecipients={effectiveLimit} editable />
     </>}
     {job && operation && phase === "message" && <>
@@ -230,18 +234,21 @@ export function AutomaticNotification({ initialJobId }: { initialJobId: string |
     {phase === "review" && confirmation && <button className="admin-button" onClick={() => setOpen(true)}>最終確認を表示</button>}
     {phase === "result" && <><p role="status">送信受付状態：{operation?.status}。送信を自動で繰り返しません。</p>
       <DeliverySummaryPanel operation={operation} deliveries={deliveries} loading={resultsLoading} error={resultsError} retry={refreshResults} />
-      <button className="admin-button secondary" disabled={resultsLoading} onClick={() => void refreshResults()}>配信結果を更新</button></>}
-    {pendingEntry && <Modal placement="center" title="選択した求人で新しい通知を作成しますか？" onClose={() => { setPendingEntry(null); window.history.replaceState(null, "", notificationEntryUrl("auto", job?.job_id)); }} footer={<>
-      <button className="admin-button secondary" onClick={() => { setPendingEntry(null); window.history.replaceState(null, "", notificationEntryUrl("auto", job?.job_id)); }}>保存済み通知へ戻る</button>
+      <button className="admin-button secondary" disabled={resultsLoading} onClick={() => void refreshResults()}>配信結果を更新</button>
+      <button className="admin-button" disabled={busy || loadingStatus !== null || resultsLoading || !operation || !["completed", "completed_with_errors"].includes(operation.status)} onClick={() => {
+        if (!lock.current && loadingStatus === null && !resultsLoading && operation && ["completed", "completed_with_errors"].includes(operation.status)) window.location.assign("/admin/jobs");
+      }}>求人を変更して新規作成</button></>}
+    {pendingEntry && <Modal placement="center" title="選択した求人で新しい通知を作成しますか？" onClose={() => { setPendingEntry(null); window.history.replaceState(null, "", notificationEntryUrl("auto", null, operation?.operation_id)); }} footer={<>
+      <button className="admin-button secondary" onClick={() => { setPendingEntry(null); window.history.replaceState(null, "", notificationEntryUrl("auto", null, operation?.operation_id)); }}>保存済み通知へ戻る</button>
       <button className="admin-button" onClick={() => { sessionStorage.removeItem(AUTO_OPERATION_KEY); window.location.assign(notificationEntryUrl("auto", pendingEntry)); }}>選択した求人で作成</button>
     </>}><p>保存済み通知は削除しません。求人一覧で選んだ求人へ切り替え、新しい通知を作成します。</p></Modal>}
-    {operation && <button className="admin-button secondary" disabled={busy} onClick={() => setResetOpen(true)}>新しい通知を作成</button>}
+    {operation && <button className="admin-button secondary" disabled={busy || resultsLoading || operation.status === "sending"} onClick={() => setResetOpen(true)}>新しい通知を作成</button>}
     {resetOpen && <Modal title="新しい通知を作成しますか？" onClose={() => setResetOpen(false)} footer={<>
       <button className="admin-button secondary" onClick={() => setResetOpen(false)}>戻る</button>
       <button className="admin-button" onClick={() => { sessionStorage.removeItem(AUTO_OPERATION_KEY); window.location.assign("/admin?mode=auto"); }}>新しい通知へ</button>
     </>}><p>保存済みの通知は削除しません。送信済みの場合は、同じ内容を重複送信しないよう結果を確認してください。</p></Modal>}
     <p><a className="admin-link" href="/admin?mode=manual">マニュアル選択へ</a>　<a className="admin-link" href="/admin/jobs">求人一覧へ</a></p>
-    {open && confirmation && <Modal title="送信前の最終確認" onClose={() => { if (!busy) setOpen(false); }} footer={<>
+    {open && confirmation && <Modal placement="center" title="送信前の最終確認" onClose={() => { if (!busy) setOpen(false); }} footer={<>
       <button className="admin-button" disabled={!canSend} onClick={() => void send()}>送信</button>
       <button className="admin-button secondary" disabled={busy} onClick={() => edit("members")}>会員を選択</button>
       <button className="admin-button secondary" disabled={busy} onClick={() => edit("message")}>通知文編集</button>

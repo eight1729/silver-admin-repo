@@ -14,10 +14,19 @@ export function parseNotificationEntry(search: string): { mode: SelectionMode | 
   return { mode, jobId: id };
 }
 
-export function notificationEntryUrl(mode: SelectionMode, jobId?: string | null): string {
+export function notificationEntryUrl(mode: SelectionMode, jobId?: string | null, operationId?: string | null): string {
   const query = new URLSearchParams({ mode });
   if (jobId) query.set("jobId", jobId);
+  if (operationId) query.set("operationId", operationId);
   return `/admin?${query}`;
+}
+
+export function parseResumeOperation(search: string): string | null {
+  const query = new URLSearchParams(search);
+  const id = query.get("operationId");
+  if (query.getAll("operationId").length !== 1 || !id ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null;
+  return id;
 }
 
 export function orderAutomaticCandidates(candidates: readonly AdminCandidate[], selected: Set<string>): AdminCandidate[] {

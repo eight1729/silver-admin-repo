@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import "./loading-overlay.css";
 
-export function LoadingOverlay({ active }: { active: boolean }) {
+export function LoadingOverlay({ active, status = "処理中…" }: { active: boolean; status?: string }) {
   const overlay = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!active) return;
@@ -25,10 +25,10 @@ export function LoadingOverlay({ active }: { active: boolean }) {
   }, [active]);
   if (!active) return null;
   return <div className="admin-loading-overlay" ref={overlay} tabIndex={-1}
-    role="status" aria-live="polite" aria-busy="true" aria-label="Loading...">
+    role="status" aria-live="polite" aria-busy="true" aria-label={status}>
     <div className="admin-loading-content">
       <span className="admin-loading-spinner" aria-hidden="true" />
-      <span>Loading...</span>
+      <span>{status}</span>
     </div>
   </div>;
 }

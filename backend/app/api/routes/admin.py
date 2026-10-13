@@ -1,4 +1,4 @@
-from app.core.jobs_diagnostics import jobs_point, jobs_failure
+from app.core.jobs_diagnostics import jobs_failure
 from app.application.automatic_selection import automatic_context
 
 from collections import Counter
@@ -139,7 +139,6 @@ async def list_jobs(
     staff: AuthenticatedStaff = Depends(require_admin_viewer),
     service: AdminApplicationService = Depends(get_admin_application_service),
 ):
-    jobs_point("admin_jobs_route", "list_jobs_start")
     stage = "list_jobs_application"
     try:
         jobs = await service.list_jobs(staff.service_id)
@@ -158,7 +157,6 @@ async def list_jobs(
             )
             for item in jobs
         )
-        jobs_point("admin_jobs_route", "list_jobs_complete")
         return response
     except Exception as exc:
         jobs_failure("admin_jobs_route", stage, exc)

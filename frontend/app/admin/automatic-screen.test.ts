@@ -12,18 +12,18 @@ import * as templates from "./notification-templates.ts";
 
 const require = createRequire(import.meta.url);
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
-function harness({ failTargets = false, restored = false, zero = false } = {}) {
+function harness({ failTargets = false, restored = false, zero = false, stale = false, completed = false } = {}) {
   const states: any[] = [], refs: any[] = [], effects: any[] = [];
   let stateIndex = 0, refIndex = 0, effectIndex = 0;
   let queued: (() => void)[] = [];
-  const calls: string[] = [];
-  const storage = new Map<string, string>(restored ? [[ordering.AUTO_OPERATION_KEY, "op-1"]] : []);
+  const calls: string[] = [], locations: string[] = [], urls: string[] = [];
+  const storage = new Map<string, string>((restored || stale) ? [[ordering.AUTO_OPERATION_KEY, "op-1"]] : []);
   const job = { job_id: "JOB-1", title: "架空の求人", description: "架空の説明", status: "published", summary: null, job_url: "" };
   const rows = ["a", "b"].map((id, i) => ({ member_id: id, member_number: String(i+1), display_name: "架空会員", recommendation_level: 5,
     line_linked: true, eligible: true, reason: null, selected: false }));
-  let op: any = { operation_id: "op-1", job_id: "JOB-1", automatic_selection: true, status: "draft", notification_type: "new_job_match",
+  let op: any = { operation_id: "op-1", job_id: "JOB-1", automatic_selection: true, status: completed ? "completed" : "draft", notification_type: "new_job_match",
     target_count: restored ? 2 : 0, selected_member_ids: restored ? ["b", "a"] : [], selected_count: restored ? 2 : 0,
-    message: { greeting: "hello", introduction: "job", note: "note" }, send_requested_at: null };
+    message: { greeting: "hello", introduction: "job", note: "note" }, send_requested_at: completed ? "now" : null };
   const cap = { mode: "production_live", ready: true, live_send_enabled: true, max_recipients: null, message_prefix: null };
   const api = {
     jobs: async () => [job], lineSendMode: async () => cap,
@@ -53,6 +53,7 @@ function harness({ failTargets = false, restored = false, zero = false } = {}) {
         if (!old || deps.some((d, index) => d !== old[index])) { effects[i] = deps; queued.push(fn); } },
     },
     "../lib/admin-api": { adminApi: api, adminErrorMessage: () => "取得失敗" },
+    "./use-loading-tasks": { useLoadingTasks: () => ({ status: null, track: (_label: string, action: () => Promise<unknown>) => action() }) },
     "./JobsNavigationGuard": { JobsNavigationGuard: "guard" }, "./notification-ui-state": uiState,
     "./AdminRouteFrame": { AdminRouteFrame: "frame" }, "./LoadingOverlay": { LoadingOverlay: "loading" },
     "./LowerPanels": { DeliverySummaryPanel: "results" },
@@ -66,13 +67,14 @@ function harness({ failTargets = false, restored = false, zero = false } = {}) {
   const source = readFileSync(new URL("./AutomaticNotification.tsx", import.meta.url), "utf8");
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 } }).outputText;
   runInNewContext(code, { module, exports: module.exports, AbortController, Set,
+    window: { history: { replaceState: (_s: any, _t: any, url: string) => urls.push(url) }, location: { assign: (url: string) => locations.push(url) } },
     require: (id: string) => mocks[id] ?? require(id),
     sessionStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) },
   });
   const render = () => { stateIndex = 0; refIndex = 0; effectIndex = 0;
-    const tree = module.exports.AutomaticNotification({ initialJobId: null });
+    const tree = module.exports.AutomaticNotification({ initialJobId: null, resumeOperationId: restored ? "op-1" : null });
     const pending = queued; queued = []; pending.forEach(fn => fn()); return tree; };
-  return { render, calls, storage };
+  return { render, calls, storage, locations, urls };
 }
 
 function find(node: any, predicate: (value: any) => boolean): any {
@@ -90,6 +92,7 @@ test("automatic screen saves standard draft and validates but sends only from fi
   assert.deepEqual(h.calls, ["create", "targets", "message", "validate"]);
   const confirm = find(h.render(), node => node.type === "modal");
   assert.ok(confirm);
+  assert.equal(confirm.props.placement, "center");
   assert.deepEqual([...h.storage.entries()], [[ordering.AUTO_OPERATION_KEY, "op-1"]]);
   const button = find(confirm, node => node.type === "button" && node.props.children === "送信");
   assert.equal(button.props.disabled, false);
@@ -118,4 +121,30 @@ test("zero automatic targets stays at job selection without manual target editin
   assert.equal(find(tree, node => node.type === "members"), undefined);
   assert.deepEqual(h.calls, []);
   assert.equal(h.storage.size, 0);
+});
+
+
+test("previous stored operation cannot contaminate new automatic work or restore its confirmation", async () => {
+  const h = harness({ stale: true }); h.render(); await flush();
+  assert.ok(find(h.render(), n => n.type === "jobs"));
+  assert.equal(find(h.render(), n => n.type === "results"), undefined);
+  await find(h.render(), n => n.type === "jobs").props.select("JOB-1");
+  assert.deepEqual(h.calls, ["create", "targets", "message", "validate"]);
+  assert.ok(h.urls.some(url => url.includes("operationId=op-1")));
+});
+
+test("completed automatic results start a fresh job-list handoff without mutating or deleting old work", async () => {
+  const h = harness({ restored: true, completed: true }); h.render(); await flush(); h.render(); await flush();
+  const button = find(h.render(), n => n.type === "button" && n.props.children === "求人を変更して新規作成");
+  assert.equal(button.props.disabled, false); button.props.onClick();
+  assert.deepEqual(h.locations, ["/admin/jobs"]); assert.deepEqual(h.calls, []);
+  assert.equal(h.storage.get(ordering.AUTO_OPERATION_KEY), "op-1");
+});
+
+test("accepted but incomplete send does not allow changing job through the result action", async () => {
+  const h = harness(); h.render(); await flush();
+  await find(h.render(), n => n.type === "jobs").props.select("JOB-1");
+  find(h.render(), n => n.type === "button" && n.props.children === "送信").props.onClick();await flush();h.render();await flush();
+  const button=find(h.render(), n => n.type === "button" && n.props.children === "求人を変更して新規作成");
+  assert.equal(button.props.disabled, true);button.props.onClick();assert.deepEqual(h.locations, []);
 });

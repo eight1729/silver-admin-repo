@@ -6,7 +6,7 @@ import type { AdminLineSendMode } from "../lib/admin-api";
 import { DEFAULT_CENTER_DISPLAY_NAME } from "./notification-templates";
 import { modePresentation } from "./send-capability";
 import { AdminHeaderActions } from "./AdminHeaderActions";
-import { AdminHomeButton } from "./AdminHomeButton";
+import { AdminHomeButton, ADMIN_NEW_EVENT } from "./AdminHomeButton";
 import { attachSidebarFocus } from "./sidebar-focus";
 
 const navigationItems = [
@@ -47,7 +47,12 @@ export function AdminShell({ mode, children }: { mode: AdminLineSendMode | null;
     <div className="admin-app-body">
       <aside ref={sidebar} hidden={!menuOpen} className={`admin-sidebar${menuOpen ? " is-open" : ""}`} id="admin-sidebar-navigation" role="dialog" aria-modal={menuOpen ? true : undefined} aria-label="スタッフ管理メニュー" tabIndex={-1}>
         <button type="button" className="admin-sidebar-close" onClick={() => setMenuOpen(false)}>メニューを閉じる</button>
-        <nav aria-label="スタッフ管理メニュー"><ul>{navigationItems.map((item) => { const current = pathname === item.href; return <li key={item.label}><a className={`admin-nav-item${current ? " is-current" : ""}`} href={item.href} aria-current={current ? "page" : undefined} onClick={() => setMenuOpen(false)}><span className="admin-nav-icon" aria-hidden="true">{item.icon}</span><span>{item.label}</span></a></li>; })}</ul></nav>
+        <nav aria-label="スタッフ管理メニュー"><ul>{navigationItems.map((item) => { const current = pathname === item.href; return <li key={item.label}><a className={`admin-nav-item${current ? " is-current" : ""}`} href={item.href} aria-current={current ? "page" : undefined} onClick={(event) => {
+          setMenuOpen(false);
+          if (item.href === "/admin" && pathname === "/admin" && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+            if (!window.dispatchEvent(new Event(ADMIN_NEW_EVENT, { cancelable: true }))) event.preventDefault();
+          }
+        }}><span className="admin-nav-icon" aria-hidden="true">{item.icon}</span><span>{item.label}</span></a></li>; })}</ul></nav>
       </aside>
       {menuOpen && <button className="admin-sidebar-backdrop" type="button" tabIndex={-1} aria-label="メニューを閉じる" onClick={() => setMenuOpen(false)} />}
       <div className="admin-content">{children}</div>

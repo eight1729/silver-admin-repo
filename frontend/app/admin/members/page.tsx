@@ -25,7 +25,7 @@ export default function AdminMembersPage() {
   }, []);
 
   return <AdminRouteFrame title="対象候補会員一覧" description="選択した求人について現在取得できる候補会員を参照専用で表示します。">
-    <LoadingOverlay active={loading} />
+    <LoadingOverlay active={loading} status="候補会員とLINE連携状態を確認中…" />
     {!jobId && <p className="admin-panel-empty">通知作成画面で求人を選択してから参照してください。</p>}
     {loading && <div className="admin-info" role="status">候補会員を読み込んでいます。</div>}
     {error && <div className="admin-error" role="alert">{error}</div>}

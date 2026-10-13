@@ -95,19 +95,8 @@ async def test_success_order_batch_size_and_response_contract(caplog, count):
     assert response.json() == [dict(job_id=str(UUID(int=i + 1)), title=PRIVATE, location=None,
         status="published", openings=1, version=NOW.isoformat(), summary=PRIVATE,
         work_days=None, work_time=None, created_at="2026-10-08T00:00:00Z") for i in range(count)]
-    lines = messages(caplog).splitlines()
-    assert lines == [
-        "component=admin_jobs_route operation=list_jobs_start",
-        "component=admin_application operation=list_jobs_start",
-        "component=current_db_business operation=search_jobs_start center_mapping_found=true",
-        "component=current_db_business operation=search_jobs_count_loaded count_loaded=true",
-        "component=current_db_business operation=search_jobs_rows_loaded rows_loaded=true",
-        "component=current_db_business operation=job_summary_start",
-        "component=current_db_business operation=job_summary_complete",
-        "component=current_db_business operation=search_jobs_complete",
-        "component=admin_application operation=list_jobs_complete",
-        "component=admin_jobs_route operation=list_jobs_complete",
-    ]
+    assert messages(caplog) == ""
+
 
 
 @pytest.mark.parametrize("error_type", [KeyError, TypeError, AttributeError, ValueError, OverflowError])

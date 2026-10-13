@@ -27,7 +27,7 @@ function harness(file: string, name: string, extra: any = {}) {
     useEffect: (fn: any, values: any[]) => {const i=effectIndex++; if (!deps[i] || values.some((v,j)=>v!==deps[i][j])) {
       deps[i]=values; queue.push(()=>{ cleanups[i]?.(); cleanups[i]=fn(); }); }} };
   const mocks: any = { react: hooks, "./candidate-order":{orderCandidates}, "./page-window":{pageWindow},
-    "./candidate-filters":filters, "./AdminHomeButton":{ADMIN_HOME_EVENT:"home"}, "../components/Modal":{Modal:"modal"} };
+    "./candidate-filters":filters, "./AdminHomeButton":{ADMIN_HOME_EVENT:"home",ADMIN_NEW_EVENT:"new"}, "../components/Modal":{Modal:"modal"} };
   const module={exports:{} as any};
   runInNewContext(ts.transpileModule(source(file),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2020}}).outputText,
     {module,exports:module.exports,Set,window:{addEventListener:(e:any,f:any)=>events.set(e,f),removeEventListener:(e:any)=>events.delete(e),location:{assign:(v:string)=>locations.push(v)}},
@@ -93,4 +93,19 @@ test("center placement is opt-in, hidden list scrolls, manual edit invalidates v
   assert.match(source("./page.tsx"),/<Modal placement="center" title="求人を変更/);
   assert.match(source("./page.tsx"),/setValidationSnapshot\(null\); setValidationInvalidation\("対象会員の編集後は再検証してください。"\); setStep\("detail"\)/);
   assert.match(source("./admin.css"),/hidden-selected ul\{max-height:16rem;overflow-y:auto/);
+});
+
+
+test("new notification navigation respects unsaved and busy guards and never resumes an old URL",()=>{
+  const h=harness("./JobsNavigationGuard.tsx","JobsNavigationGuard");
+  let prevented=0;
+  const event={preventDefault:()=>{prevented++;}};
+  h.render({busy:true,dirty:true});h.events.get("new")(event);assert.equal(h.locations.length,0);
+  h.render({busy:false,dirty:true});h.events.get("new")(event);
+  let tree=h.render({busy:false,dirty:true});assert.equal(tree.type,"modal");
+  tree.props.onClose();assert.equal(h.render({busy:false,dirty:true}),null);assert.equal(h.locations.length,0);
+  h.events.get("new")(event);tree=h.render({busy:false,dirty:true});
+  nodes(tree).find(n=>n.type==="button"&&n.props.children==="新しい通知を作成").props.onClick();
+  assert.deepEqual(h.locations,["/admin"]);assert.equal(prevented,3);
+  h.render({busy:false,dirty:false});h.events.get("new")(event);assert.deepEqual(h.locations,["/admin","/admin"]);
 });
