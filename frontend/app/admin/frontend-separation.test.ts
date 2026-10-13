@@ -8,8 +8,9 @@ test("Admin target builds and serves only its owned routes", () => {
   const root = read("../../targets/admin/app/page.tsx");
   const middleware = read("../../targets/admin/middleware.ts");
   const pkg = JSON.parse(read("../../package.json"));
-  assert.match(root, /AdminLayout/);
-  assert.match(root, /AdminPage/);
+  assert.match(root, /redirect\("\/admin\/dashboard"\)/);
+  assert.match(read("../../targets/admin/app/admin/layout.tsx"), /export \{ default \} from "\.\.\/\.\.\/\.\.\/\.\.\/app\/admin\/layout"/);
+  assert.match(read("../../targets/admin/app/admin/page.tsx"), /export \{ default \} from "\.\.\/\.\.\/\.\.\/\.\.\/app\/admin\/page"/);
   assert.doesNotMatch(root + middleware, /app\/liff|liff-api|LIFF/);
   assert.equal(pkg.scripts.dev, "node config/run-next.js dev");
   assert.equal(pkg.scripts.build, "node config/run-next.js build");

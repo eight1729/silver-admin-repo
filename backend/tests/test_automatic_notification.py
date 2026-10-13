@@ -7,7 +7,7 @@ import pytest
 
 from app.application.automatic_selection import automatic_context, select_automatic_members, canonical
 from app.application.admin_service import AdminCandidate, AdminDependencyUnavailableError
-from app.application.notification_service import OperationNotSendableError, ValidateNotificationOperationCommand
+from app.application.notification_service import InvalidNotificationCommandError, OperationNotSendableError, ValidateNotificationOperationCommand
 from app.domain.errors.errors import ExternalSystemUnavailableError, ExternalMemberNotFoundError, ExternalJobNotFoundError
 from app.domain.models.external_business import CandidateMember, ExternalMemberSummary
 from app.domain.models.notification import MemberValidationResult, NotificationValidationResult
@@ -321,3 +321,53 @@ async def test_parallel_automatic_send_reserves_once(db):
     await first
     assert len(w.dispatched) == 1
     assert {item.external_member_id for item in await w.repo.get_outbox_records("svc", op)} == set(w.members)
+
+
+async def test_saved_delivery_reads_do_not_require_current_linkage(db):
+    w = await world(db)
+    op = await prepare(w)
+    view = await validate(w, op)
+    await send(w, op, view["confirmation_token"])
+    async def offline(request):
+        raise ValueError("LINE batch unavailable")
+    w.app._line_internal_client.batch_get_linkages = offline
+    with pytest.raises(AdminDependencyUnavailableError):
+        await w.app.list_candidates("svc", "JOB-001")
+    assert (await w.app.get_operation("svc", op)).operation.send_requested_at
+    assert len(await w.app.list_deliveries("svc", op)) == 3
+
+
+@pytest.mark.parametrize("failure", ["message", "validation"])
+async def test_reselection_partial_success_retries_without_replaying_explicit_intent(db, monkeypatch, failure):
+    w = await world(db)
+    op = await prepare(w)
+    w.blocked.add("m-0")
+    old = await validate(w, op)
+    w.blocked.clear()
+    async def targets(explicit=()):
+        return await w.app.replace_targets(service_id="svc", operation_id=op, staff_id="staff",
+            selected_member_ids=tuple(w.members), reinclude_member_ids=explicit)
+    await targets(("m-0",))
+    assert not automatic_context((await w.repo.get_operation("svc", op)))["excluded"]
+    async def unavailable(*args, **kwargs):
+        raise RuntimeError("downstream unavailable")
+    method = "update_operation" if failure == "message" else "validate"
+    with monkeypatch.context() as patch:
+        patch.setattr(w.app, method, unavailable)
+        with pytest.raises(RuntimeError):
+            if failure == "message":
+                await w.app.update_operation(service_id="svc", operation_id=op, staff_id="staff",
+                    greeting="hello", introduction="changed", note="note")
+            else:
+                await validate(w, op)
+    with pytest.raises(InvalidNotificationCommandError):
+        await targets(("m-0",))  # The backend must continue rejecting replayed/invalid intent.
+    with pytest.raises(InvalidNotificationCommandError):
+        await targets(("not-selected",))
+    with pytest.raises(OperationNotSendableError):
+        await send(w, op, old["confirmation_token"])
+    await targets()
+    current = await validate(w, op)
+    assert current["sendable_count"] == 3 and current["excluded_count"] == 0
+    assert current["confirmation_token"] != old["confirmation_token"]
+    assert not await w.repo.get_outbox_records("svc", op)

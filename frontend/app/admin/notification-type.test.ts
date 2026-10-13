@@ -24,7 +24,7 @@ function load(path: string): Record<string, unknown> {
   } }).outputText;
   const module = { exports: {} };
   runInNewContext(code, { module, exports: module.exports, require: (id: string) => {
-    if (id === "react") return { ...React, useState: (value: unknown) => [typeof value === "number" ? candidatePage : value, () => {}], useEffect: () => {} };
+    if (id === "react") return { ...React, useState: (value: unknown) => [typeof value === "number" ? candidatePage : value, () => {}], useRef: (value: unknown) => ({ current: value }), useEffect: () => {} };
     if (!id.startsWith(".")) return require(id);
     const base = resolve(dirname(path), id);
     return load(existsSync(base + ".ts") ? base + ".ts" : base + ".tsx");
@@ -142,7 +142,7 @@ test("candidate checkboxes preserve multiple selection across pages and filters 
     return React.Children.toArray(node).flatMap(child => {
       if (!React.isValidElement(child)) return [];
       const element = child as React.ReactElement<Record<string, unknown>>;
-      return element.type === "input" ? [element] : inputs(element.props.children as React.ReactNode);
+      return element.type === "input" && element.props.name === "admin-selected-candidate" ? [element] : inputs(element.props.children as React.ReactNode);
     });
   }
   function render(filter = "all", editable = true) {
@@ -164,7 +164,7 @@ test("candidate checkboxes preserve multiple selection across pages and filters 
     candidatePage = 2; click(0);
     assert.deepEqual([...selected], ["M0", "M2", "M5"]);
     candidatePage = 1;
-    assert.match(renderToStaticMarkup(render("line_linked")), /選択中の会員は現在の絞り込み結果には表示されていません/);
+    assert.match(renderToStaticMarkup(render("line_linked")), /現在の絞り込み結果に表示されていない選択済み会員: 1人/);
     assert.deepEqual([...selected], ["M0", "M2", "M5"]);
     maxRecipients = 1; selected = new Set(["M0"]);
     assert.equal(inputs(render())[1].props.disabled, true);
@@ -188,7 +188,7 @@ test("member number is display-only; checkbox selection keeps UUID with null/abs
       selected: new Set(), editable: true, busy: false, filter: "all", notificationType: "new_job_match",
       toggle: (value: string) => selected.push(value), setFilter: () => {}, setNotificationType: () => {},
     });
-    assert.ok(renderToStaticMarkup(tree).includes(`<th scope="row">${number ?? id}</th>`));
+    assert.ok(renderToStaticMarkup(tree).includes(`<th scope="row">${number ?? "未取得"}</th>`));
     function visit(node: React.ReactNode) {
       React.Children.forEach(node, child => {
         if (!React.isValidElement(child)) return;
@@ -214,7 +214,7 @@ test("candidate panel renders member number order before pagination and selects 
     toggle: (value: string) => selected.push(value), setFilter: () => {}, setNotificationType: () => {},
   });
   const html = renderToStaticMarkup(tree);
-  const positions = ["0001", "0002", "0003", "0010"].map(n => html.indexOf(`<th scope="row">${n}</th>`));
+  const positions = ["0010", "0003", "0002", "0001"].map(n => html.indexOf(`<th scope="row">${n}</th>`));
   assert.ok(positions.every((p, index) => p >= 0 && (index === 0 || p > positions[index - 1])));
   function visit(node: React.ReactNode) {
     React.Children.forEach(node, child => {
@@ -225,6 +225,6 @@ test("candidate panel renders member number order before pagination and selects 
     });
   }
   visit(tree);
-  assert.deepEqual(selected, ["uuid-0001", "uuid-0002", "uuid-0003", "uuid-0010"]);
+  assert.deepEqual(selected, ["uuid-0010", "uuid-0003", "uuid-0002", "uuid-0001"]);
   assert.equal(candidates[0].member_number, "0003");
 });

@@ -127,7 +127,7 @@ test("page shares GET-only refresh with retry and cleans up by operation identit
   assert.match(effect, /!restoringOperation/);
   assert.match(effect, /setOperation\(nextOperation\); setDeliveries\(nextDeliveries\)/);
   assert.doesNotMatch(effect, /adminApi.send/);
-  assert.match(source, /await deliveryRefresh.current\?\.refresh\(\)/);
+  assert.match(source, /await track\("送信結果を取得中…", async \(\) => deliveryRefresh.current\?\.refresh\(\)\)/);
   assert.match(source, /currentDeliveries.items.every/);
 });
 

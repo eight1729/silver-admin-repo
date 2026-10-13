@@ -12,7 +12,9 @@ import * as templates from "./notification-templates.ts";
 
 const require = createRequire(import.meta.url);
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
-function harness({ failTargets = false, restored = false, zero = false, stale = false, completed = false } = {}) {
+function harness({ failTargets = false, restored = false, zero = false, stale = false, completed = false,
+  accepted = false, failCandidates = false, failResults = false, excludedMember = false,
+  failMessage = false, failValidation = false, lostTargetsResponse = false } = {}) {
   const states: any[] = [], refs: any[] = [], effects: any[] = [];
   let stateIndex = 0, refIndex = 0, effectIndex = 0;
   let queued: (() => void)[] = [];
@@ -23,26 +25,32 @@ function harness({ failTargets = false, restored = false, zero = false, stale = 
     line_linked: true, eligible: true, reason: null, selected: false }));
   let op: any = { operation_id: "op-1", job_id: "JOB-1", automatic_selection: true, status: completed ? "completed" : "draft", notification_type: "new_job_match",
     target_count: restored ? 2 : 0, selected_member_ids: restored ? ["b", "a"] : [], selected_count: restored ? 2 : 0,
-    message: { greeting: "hello", introduction: "job", note: "note" }, send_requested_at: completed ? "now" : null };
+    updated_at: "before", message: { greeting: "hello", introduction: "job", note: "note" }, send_requested_at: completed || accepted ? "now" : null };
+  const excludedIds = new Set(excludedMember ? ["a"] : []);
+  const reincludes: string[][] = [];
   const cap = { mode: "production_live", ready: true, live_send_enabled: true, max_recipients: null, message_prefix: null };
   const api = {
     jobs: async () => [job], lineSendMode: async () => cap,
-    job: async () => job, candidates: async () => rows,
+    job: async () => job, candidates: async () => { if (failCandidates) throw Error("candidate outage"); return rows; },
     automaticSelection: async () => ({ selected_member_ids: zero ? [] : ["b", "a"], reason: zero ? "対象0人" : null }),
     createOperation: async (body: any) => { calls.push("create"); assert.equal(body.automatic_selection, true); op.message = body; return op; },
     operation: async () => op,
-    updateTargets: async (_id: string, ids: string[]) => {
+    updateTargets: async (_id: string, ids: string[], explicit: string[]) => {
+      reincludes.push(Array.from(explicit));
       calls.push("targets"); if (failTargets) { failTargets = false; throw new Error("offline"); }
-      op = { ...op, selected_member_ids: ids, target_count: 2, selected_count: ids.length }; return op;
+      if (explicit.some(id => !excludedIds.has(id) || !ids.includes(id))) throw Error("invalid explicit re-selection");
+      explicit.forEach(id => excludedIds.delete(id));
+      op = { ...op, updated_at: "targets-saved", selected_member_ids: ids, target_count: 2, selected_count: ids.length };
+      if (lostTargetsResponse) { lostTargetsResponse = false; throw Error("response lost"); } return op;
     },
-    updateOperation: async (_id: string, body: any) => { calls.push("message"); op = { ...op, message: body }; return op; },
-    validate: async () => { calls.push("validate"); op = { ...op, status: "ready" }; return {}; },
-    confirmation: async () => ({ operation_id: "op-1", initial_count: 2, selected_count: 2, sendable_count: 2, excluded_count: 0,
+    updateOperation: async (_id: string, body: any) => { calls.push("message"); if (failMessage) { failMessage = false; throw Error("message failed"); } op = { ...op, message: body }; return op; },
+    validate: async () => { calls.push("validate"); if (failValidation) { failValidation = false; throw Error("validation failed"); } op = { ...op, status: "ready" }; return {}; },
+    confirmation: async () => ({ operation_id: "op-1", initial_count: 2, selected_count: op.selected_count, sendable_count: op.selected_count - excludedIds.size, excluded_count: excludedIds.size,
       message: op.message, confirmation_token: "t".repeat(64), can_send: true, requires_revalidation: false, selected_recipient_limit: null,
-      targets: rows.map(row => ({ ...row, disposition: "send", mobile_phone_last4: "4321" })) }),
+      targets: rows.filter(row => op.selected_member_ids.includes(row.member_id)).map(row => ({ ...row, disposition: excludedIds.has(row.member_id) ? "skip" : "send", mobile_phone_last4: "4321" })) }),
     notificationLink: async () => ({ url: "https://example.invalid/job" }),
     send: async (_id: string, token: string) => { calls.push("send"); assert.equal(token, "t".repeat(64)); op = { ...op, send_requested_at: "now" }; return op; },
-    deliveries: async () => ({ items: [], summary: {} }),
+    deliveries: async () => { if (failResults) throw Error("results failed"); return { items: [{ member_id: "a", status: completed ? "sent" : "pending" }], summary: {} }; },
   };
   const mocks: Record<string, any> = {
     react: { ...React,
@@ -74,8 +82,57 @@ function harness({ failTargets = false, restored = false, zero = false, stale = 
   const render = () => { stateIndex = 0; refIndex = 0; effectIndex = 0;
     const tree = module.exports.AutomaticNotification({ initialJobId: null, resumeOperationId: restored ? "op-1" : null });
     const pending = queued; queued = []; pending.forEach(fn => fn()); return tree; };
-  return { render, calls, storage, locations, urls };
+  return { render, calls, storage, locations, urls, reincludes, api, changeOperation: (change: any) => { op = { ...op, ...change }; } };
 }
+
+test("lost response blocks target replay until reconciliation succeeds, and never restores its token", async () => {
+  const h = harness({ restored: true, excludedMember: true, lostTargetsResponse: true });
+  await reselect(h);
+  const operation = h.api.operation;
+  h.api.operation = async () => { throw Error("read outage"); };
+  await find(h.render(), n => n.type === "members").props.begin();
+  await find(h.render(), n => n.type === "members").props.begin();
+  assert.equal(h.reincludes.length, 1);
+  assert.equal(find(h.render(), n => n.type === "modal"), undefined);
+  h.api.operation = operation;
+  await find(h.render(), n => n.type === "members").props.begin();
+  assert.equal(h.reincludes.length, 1); // Recovery requires a fresh review action.
+  assert.equal(find(h.render(), n => n.type === "modal"), undefined);
+  await find(h.render(), n => n.type === "members").props.begin();
+  assert.deepEqual(h.reincludes, [["a"], []]);
+  assert.ok(find(h.render(), n => n.type === "modal"));
+});
+
+test("concurrent target change after a lost response replaces stale selection and does not report save success", async () => {
+  const h = harness({ restored: true, excludedMember: true, lostTargetsResponse: true });
+  await reselect(h);
+  const updateTargets = h.api.updateTargets;
+  h.api.updateTargets = async (...args) => {
+    try { return await updateTargets(...args); }
+    finally { h.changeOperation({ selected_member_ids: ["b"], selected_count: 1, updated_at: "concurrent" }); }
+  };
+  const oldAction = find(h.render(), n => n.type === "members").props.begin;
+  await oldAction();
+  assert.deepEqual([...find(h.render(), n => n.type === "members").props.selected], ["b"]);
+  assert.equal(find(h.render(), n => n.type === "modal"), undefined);
+  await oldAction();
+  assert.equal(h.reincludes.length, 1);
+  assert.equal(h.calls.includes("message"), false);
+});
+
+test("an exclusion stays excluded without explicit re-selection and stale selection handlers cannot save", async () => {
+  const h = harness({ restored: true, excludedMember: true });
+  h.render(); await flush();
+  find(h.render(), n => n.type === "button" && n.props.children === "会員を選択").props.onClick();
+  const stale = find(h.render(), n => n.type === "members").props.begin;
+  find(h.render(), n => n.type === "members").props.toggle("b");
+  await stale(); assert.deepEqual(h.calls, []);
+  await find(h.render(), n => n.type === "members").props.begin();
+  assert.deepEqual(h.reincludes, [[]]);
+  assert.match(JSON.stringify(find(h.render(), n => n.type === "modal")), /除外/);
+  const view = await h.api.confirmation();
+  assert.equal(view.targets.find(t => t.member_id === "a")?.disposition, "skip");
+});
 
 function find(node: any, predicate: (value: any) => boolean): any {
   if (!node) return undefined;
@@ -147,4 +204,69 @@ test("accepted but incomplete send does not allow changing job through the resul
   find(h.render(), n => n.type === "button" && n.props.children === "送信").props.onClick();await flush();h.render();await flush();
   const button=find(h.render(), n => n.type === "button" && n.props.children === "求人を変更して新規作成");
   assert.equal(button.props.disabled, true);button.props.onClick();assert.deepEqual(h.locations, []);
+});
+
+for (const completed of [true, false]) test(`resume ${completed ? "completed" : "accepted"} operation despite candidate outage`, async () => {
+  const h = harness({ restored: true, completed, accepted: true, failCandidates: true });
+  h.render(); await flush(); h.render(); await flush();
+  const tree = h.render(), result = find(tree, n => n.type === "results");
+  assert.ok(result); assert.equal(result.props.deliveries.items[0].status, completed ? "sent" : "pending");
+  assert.equal(find(tree, n => n.type === "modal"), undefined);
+  assert.equal(find(tree, n => n.type === "editor"), undefined);
+  assert.deepEqual(h.calls, []);
+});
+
+test("unsent candidate outage remains an error and result failure stays explicitly retryable", async () => {
+  const draft = harness({ restored: true, failCandidates: true }); draft.render(); await flush();
+  assert.ok(find(draft.render(), n => n.props.role === "alert"));
+  assert.equal(find(draft.render(), n => n.type === "results"), undefined);
+  const sent = harness({ restored: true, completed: true, failCandidates: true, failResults: true });
+  sent.render(); await flush(); sent.render(); await flush();
+  assert.equal(find(sent.render(), n => n.type === "results").props.error, "取得失敗");
+  assert.deepEqual(sent.calls, []);
+});
+
+async function reselect(h: ReturnType<typeof harness>) {
+  h.render(); await flush();
+  find(h.render(), n => n.type === "button" && n.props.children === "会員を選択").props.onClick();
+  find(h.render(), n => n.type === "members").props.toggle("a");
+  find(h.render(), n => n.type === "members").props.toggle("a");
+}
+for (const failure of ["failMessage", "failValidation", "lostTargetsResponse", "failTargets"] as const) {
+  test(`explicit re-selection safely retries after ${failure}`, async () => {
+    const h = harness({ restored: true, excludedMember: true, [failure]: true });
+    await reselect(h);
+    const firstAction = find(h.render(), n => n.type === "members").props.begin;
+    await firstAction();
+    assert.equal(find(h.render(), n => n.type === "modal"), undefined);
+    if (failure !== "failTargets") {
+      await firstAction();
+      assert.equal(h.reincludes.length, 1); // A stale handler must not replay consumed intent.
+    }
+    await find(h.render(), n => n.type === "members").props.begin();
+    assert.ok(find(h.render(), n => n.type === "modal"));
+    assert.deepEqual(h.reincludes, [["a"], failure === "failTargets" ? ["a"] : []]);
+    assert.equal(h.calls.includes("send"), false);
+  });
+}
+
+for (const status of ["sending", "completed", "completed_with_errors"]) test(`durable ${status} status restores results without a timestamp or editing dependencies`, async () => {
+  const h = harness({ restored: true }); h.changeOperation({ status, send_requested_at: null });
+  h.api.jobs = h.api.job = h.api.candidates = h.api.confirmation = h.api.lineSendMode = async () => { throw Error("editing dependency unavailable"); };
+  h.render(); await flush(); h.render(); await flush();
+  const result = find(h.render(), n => n.type === "results");
+  assert.ok(result); assert.equal(result.props.operation.status, status); assert.equal(result.props.error, "");
+  assert.deepEqual(h.calls, []);
+});
+
+test("result retry converges from waiting to completed using reads only", async () => {
+  const h = harness({ restored: true, accepted: true, failCandidates: true, failResults: true });
+  h.render(); await flush(); h.render(); await flush();
+  assert.equal(find(h.render(), n => n.type === "results").props.error, "取得失敗");
+  h.changeOperation({ status: "completed" });
+  h.api.deliveries = async () => ({ items: [{ member_id: "a", status: "sent" }], summary: {} });
+  await find(h.render(), n => n.type === "results").props.retry();
+  const result = find(h.render(), n => n.type === "results");
+  assert.equal(result.props.error, ""); assert.equal(result.props.operation.status, "completed");
+  assert.equal(result.props.deliveries.items[0].status, "sent"); assert.deepEqual(h.calls, []);
 });

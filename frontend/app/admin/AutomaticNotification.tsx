@@ -16,6 +16,7 @@ import { createTemplateMessage, DEFAULT_CENTER_DISPLAY_NAME, replaceExactCenterN
 import type { CandidateFilterId } from "./candidate-filters";
 
 const emptyMessage = { greeting: "こんにちは。", introduction: "おすすめの求人をご案内します。", note: "内容をご確認ください。" };
+const sendAccepted = (op: AdminOperation) => Boolean(op.send_requested_at || ["sending", "completed", "completed_with_errors"].includes(op.status));
 
 export function AutomaticNotification({ initialJobId, resumeOperationId = null }: { initialJobId: string | null; resumeOperationId?: string | null }) {
   const { status: loadingStatus, track } = useLoadingTasks();
@@ -52,6 +53,9 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
   const lock = useRef(false);
   const entryApplied = useRef(false);
   const alive = useRef(true);
+  const uncertainTargets = useRef<AdminOperation | null>(null);
+  const selectionGeneration = useRef(0);
+  const renderedGeneration = selectionGeneration.current;
 
   function storeOperation(value: AdminOperation) {
     operationRef.current = value;
@@ -76,13 +80,21 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
     const signal = controller.signal;
     void (async () => {
       try {
+        const saved = resumeOperationId
+          ? await track("通知の状態を取得中…", () => adminApi.operation(resumeOperationId, signal)) : null;
+        if (signal.aborted) return;
+        if (saved && !saved.automatic_selection) throw new Error("invalid automatic context");
+        if (saved && sendAccepted(saved)) {
+          // Durable delivery history does not depend on current candidate/linkage availability.
+          storeOperation(saved); setSelected(new Set(saved.selected_member_ids)); setMessage(saved.message);
+          setPhase("result");
+          return;
+        }
         const [allJobs, cap] = await Promise.all([track("求人一覧を取得中…", () => adminApi.jobs(signal)), track("送信設定を確認中…", () => adminApi.lineSendMode(signal))]);
         if (signal.aborted) return;
         setJobs(allJobs); setCapability(cap);
         const id = resumeOperationId;
-        if (id) {
-          const saved = await track("通知の状態を取得中…", () => adminApi.operation(id, signal));
-          if (!saved.automatic_selection) throw new Error("invalid automatic context");
+        if (id && saved) {
           const [detail, rows, view] = await Promise.all([track("求人詳細を取得中…", () => adminApi.job(saved.job_id, signal)), track("候補会員とLINE連携状態を確認中…", () => adminApi.candidates(saved.job_id, signal)), track("送信前の確認情報を取得中…", () => adminApi.confirmation(id, signal))]);
           if (signal.aborted) return;
           storeOperation(saved); setJob(detail); setCandidates(retainMissing(rows, view));
@@ -91,7 +103,7 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
           if (signal.aborted) return;
           setSelected(new Set(restoredIds)); setMessage(saved.message); setNotice(saved.message.note);
           setTemplate("custom"); setSelectedLimit(view.selected_recipient_limit); appliedNotice.current = saved.message.note; excluded.current = new Set(view.targets.filter(t => t.disposition !== "send").map(t => t.member_id));
-          setPhase(saved.send_requested_at || ["sending", "completed", "completed_with_errors"].includes(saved.status) ? "result" : "message");
+          setPhase("message");
           setError("保存済み通知を復元しました。送信前に再検証してください。");
           if (initialJobId && initialJobId !== saved.job_id) {
             if (allJobs.some(item => item.job_id === initialJobId && item.status === "published")) setPendingEntry(initialJobId);
@@ -133,15 +145,62 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, operation?.operation_id]);
 
+  async function reconcileTargets() {
+    const before = uncertainTargets.current;
+    if (!before) return;
+    const current = await track("保存状態を確認中…", () => adminApi.operation(before.operation_id));
+    if (sendAccepted(current)) {
+      storeOperation(current); setConfirmation(null); setReinclude(new Set()); setPhase("result");
+    } else if (JSON.stringify(current) !== JSON.stringify(before)) {
+      // A changed operation is not proof that our PUT succeeded. Recover the latest
+      // selection and validate its persisted exclusion latch; never replay old intent.
+      await track("保存済み対象を再検証中…", () => adminApi.validate(before.operation_id));
+      const checked = await adminApi.operation(before.operation_id);
+      const view = await track("送信前の確認情報を取得中…", () => adminApi.confirmation(before.operation_id));
+      const latest = await adminApi.operation(before.operation_id);
+      if (JSON.stringify(checked) !== JSON.stringify(latest)) throw new Error("selection changed during recovery");
+      if (!alive.current) return;
+      storeOperation(latest); setSelected(new Set(latest.selected_member_ids));
+      if (!messagesEqual(latest.message, before.message)) setMessage(latest.message);
+      excluded.current = new Set(view.targets.filter(t => t.disposition !== "send").map(t => t.member_id));
+      setReinclude(new Set()); setConfirmation(null); setPhase(sendAccepted(latest) ? "result" : "members");
+      selectionGeneration.current++;
+    } else {
+      // Read the confirmation too, and fence edits made while its attributes resolve.
+      await track("送信前の確認情報を取得中…", () => adminApi.confirmation(before.operation_id));
+      const latest = await adminApi.operation(before.operation_id);
+      if (JSON.stringify(current) !== JSON.stringify(latest)) throw new Error("selection changed during recovery");
+      // Nothing was persisted: keep the explicit request and local selection for retry.
+    }
+    if (alive.current) uncertainTargets.current = null;
+  }
+
   async function persistAndValidate(detail: AdminJobDetail, ids: Set<string>, body: AdminMessage, explicit: Set<string>) {
+    if (uncertainTargets.current) {
+      await reconcileTargets();
+      throw new Error("review recovered selection before retry");
+    }
     if (!ids.size || detail.status !== "published") throw new Error("no sendable selection");
     let op = operationRef.current;
     if (!op) {
       op = await track("通知を作成中…", () => adminApi.createOperation({ job_id: detail.job_id, notification_type: "new_job_match", automatic_selection: true, ...body }));
       storeOperation(op); // Keep partial success so retry never creates another operation.
     }
-    await track("対象会員を保存中…", () => adminApi.updateTargets(op.operation_id, [...ids], [...explicit].filter(id => ids.has(id))));
-    await track("通知文を保存中…", () => adminApi.updateOperation(op.operation_id, body));
+    const applied = [...explicit].filter(id => ids.has(id));
+    let savedTargets: AdminOperation;
+    try {
+      savedTargets = await track("対象会員を保存中…", () => adminApi.updateTargets(op.operation_id, [...ids], applied));
+    } catch (e) {
+      uncertainTargets.current = op;
+      await reconcileTargets();
+      throw e; // Reconciliation is never reported as successful saving or confirmation.
+    }
+    storeOperation(savedTargets);
+    applied.forEach(id => excluded.current.delete(id));
+    setReinclude(values => new Set([...values].filter(id => !applied.includes(id))));
+    selectionGeneration.current++;
+    const savedBody = await track("通知文を保存中…", () => adminApi.updateOperation(op.operation_id, body));
+    storeOperation(savedBody);
     await track("送信前の検証中…", () => adminApi.validate(op.operation_id));
     const [current, view, cap, targetLink] = await Promise.all([
       track("通知の状態を取得中…", () => adminApi.operation(op.operation_id)), track("送信前の確認情報を取得中…", () => adminApi.confirmation(op.operation_id)), track("送信設定を確認中…", () => adminApi.lineSendMode()), track("求人リンクを取得中…", () => adminApi.notificationLink(detail.job_id)),
@@ -172,10 +231,10 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
   }
 
   async function saveAndReview() {
-    if (!job || lock.current || !selected.size) return;
+    if (!job || lock.current || !selected.size || renderedGeneration !== selectionGeneration.current || (operationRef.current && sendAccepted(operationRef.current))) return;
     lock.current = true; setBusy(true); setError(""); setConfirmation(null); setOpen(false);
     try { await persistAndValidate(job, selected, message, reinclude); }
-    catch (e) { if (alive.current) setError(adminErrorMessage(e)); }
+    catch (e) { if (alive.current) setError(`${adminErrorMessage(e)} 保存状態を確認し、除外者を戻す場合は会員を選び直してください。`); }
     finally { lock.current = false; if (alive.current) setBusy(false); }
   }
 
@@ -198,7 +257,7 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
       // A network error may follow an accepted reservation. Read before offering another send.
       try {
         const current = await track("通知の状態を取得中…", () => adminApi.operation(confirmation.operation_id)); storeOperation(current);
-        if (current.send_requested_at || ["sending", "completed", "completed_with_errors"].includes(current.status)) setPhase("result");
+        if (sendAccepted(current)) setPhase("result");
       } catch { /* Token remains discarded. No automatic resend. */ }
     } finally { lock.current = false; if (alive.current) setBusy(false); }
   }
@@ -213,9 +272,9 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
       <p>選択済みを上部に表示します。除外者を戻す場合はチェックを一度解除して再選択してください。初期100人上限は編集後には適用されません。</p>
       <CandidateSelectionPanel submitLabel="保存・再検証して最終確認へ" job={job} candidates={candidates} selected={selected}
         notificationType="new_job_match" notificationTypeLocked setNotificationType={() => {}} filter={filter} setFilter={setFilter}
-        toggle={(id) => { if (busy) return; const next = new Set(selected); if (next.has(id)) next.delete(id); else {
+        toggle={(id) => { if (busy || lock.current || uncertainTargets.current || renderedGeneration !== selectionGeneration.current) return; const next = new Set(selected); if (next.has(id)) next.delete(id); else {
           next.add(id); if (excluded.current.has(id)) setReinclude(values => new Set([...values, id]));
-        } setSelected(next); setConfirmation(null); }}
+        } selectionGeneration.current++; setSelected(next); setConfirmation(null); }}
         begin={saveAndReview} busy={busy} error={false} retry={async () => setCandidates(await track("候補会員とLINE連携状態を確認中…", () => adminApi.candidates(job.job_id)))}
         targetsPending={Boolean(operation)} maxRecipients={effectiveLimit} editable />
     </>}
