@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.core.jobs_diagnostics import jobs_point, jobs_failure
+from app.core.candidate_diagnostics import candidate_request, point as candidate_point
 from app.application.automatic_selection import automatic_context, confirmation_identity, select_automatic_members
 
 from dataclasses import dataclass
@@ -221,6 +222,7 @@ class AdminApplicationService:
             raise ExternalJobNotFoundError("job was not found")
         return job
 
+    @candidate_request
     async def list_candidates(
         self, service_id: str, job_id: str
     ) -> tuple[AdminCandidate, ...]:
@@ -229,9 +231,11 @@ class AdminApplicationService:
         candidates = await self._external.list_candidate_members(
             external_organization_id=scope.organization_id, external_job_id=job_id
         )
+        candidate_point("candidate_provider_complete", count=len(candidates))
         linkage = None
         if self._line_internal_client is not None:
             scope = self._line_scope(service_id)
+            candidate_point("line_scope_complete")
             linkage = await self._lookup_linkages(
                 scope, (item.external_member_id for item in candidates)
             )
@@ -318,12 +322,15 @@ class AdminApplicationService:
         try:
             for offset in range(0, len(ids), 500):
                 chunk = ids[offset:offset + 500]
+                candidate_point("line_batch_start", request_count=len(chunk))
                 response = LinkageStatusBatchResponse.model_validate(
                     await self._line_internal_client.batch_get_linkages(
                         LinkageStatusBatchRequest(scope=scope, external_member_ids=chunk)
                     )
                 )
                 returned = tuple(item.external_member_id for item in response.items)
+                candidate_point("line_batch_identity_check", request_count=len(chunk),
+                                response_count=len(returned), matched_count=len(set(returned) & set(chunk)))
                 if len(returned) != len(chunk) or set(returned) != set(chunk):
                     raise ValueError("linkage response identity mismatch")
                 lookup.update((item.external_member_id, item.line_linked) for item in response.items)

@@ -4,6 +4,9 @@ from urllib.parse import urlsplit
 from datetime import datetime
 from uuid import UUID
 
+from contextlib import nullcontext
+from app.core.candidate_diagnostics import point as candidate_point, span as candidate_span
+
 import httpx
 from pydantic import SecretStr, ValidationError
 
@@ -128,15 +131,18 @@ class HttpLineInternalApiClient:
 
     async def _request(self, method, path, model, *, expected_status, json=None):
         try:
-            response = await self._client.request(
-                method,
-                f"{self._base_url}{path}",
-                headers={
-                    "Authorization": f"Bearer {self._token.get_secret_value()}",
-                    "Accept": "application/json",
-                },
-                json=json,
-            )
+            with candidate_span("line_http") if path == "/internal/v1/line-linkages:batch-get" else nullcontext():
+                response = await self._client.request(
+                    method,
+                    f"{self._base_url}{path}",
+                    headers={
+                        "Authorization": f"Bearer {self._token.get_secret_value()}",
+                        "Accept": "application/json",
+                    },
+                    json=json,
+                )
+            if path == "/internal/v1/line-linkages:batch-get":
+                candidate_point("line_http_response", http_status=response.status_code)
         except (httpx.TimeoutException, httpx.NetworkError) as error:
             raise LineInternalApiRetryableError(
                 "LINE internal API transport is unavailable",
