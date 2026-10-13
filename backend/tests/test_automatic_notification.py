@@ -267,3 +267,57 @@ async def test_scope_auth_and_selected_only_confirmation_api(db):
         app.dependency_overrides[require_admin_operator] = viewer_only
         assert (await client.get(f"/admin/notification-operations/{op}/confirmation")).status_code == 403
     assert not await w.repo.get_outbox_records("svc", op)
+
+
+@pytest.mark.parametrize("token_kind", ["other_operation", "tampered"])
+async def test_confirmation_token_cannot_be_transferred_or_modified(db, token_kind):
+    w = await world(db)
+    first, second = await prepare(w), await prepare(w)
+    first_view = await validate(w, first)
+    second_view = await validate(w, second)
+    assert first_view["confirmation_token"] != second_view["confirmation_token"]
+    token = first_view["confirmation_token"] if token_kind == "other_operation" else "0" * 64
+    with pytest.raises(OperationNotSendableError):
+        await send(w, second, token)
+    assert not await w.repo.get_outbox_records("svc", second)
+    assert not w.dispatched
+
+
+async def test_same_count_target_identity_replacement_invalidates_confirmation(db):
+    w = await world(db)
+    op = await prepare(w)
+    await w.app.replace_targets(service_id="svc", operation_id=op, staff_id="staff",
+                                selected_member_ids=("m-0", "m-1"))
+    before = await validate(w, op)
+    await w.app.replace_targets(service_id="svc", operation_id=op, staff_id="staff",
+                                selected_member_ids=("m-1", "m-2"))
+    after = await validate(w, op)
+    assert before["sendable_count"] == after["sendable_count"] == 2
+    with pytest.raises(OperationNotSendableError):
+        await send(w, op, before["confirmation_token"])
+    assert not await w.repo.get_outbox_records("svc", op)
+    await send(w, op, after["confirmation_token"])
+    assert {item.external_member_id for item in await w.repo.get_outbox_records("svc", op)} == {"m-1", "m-2"}
+
+
+async def test_parallel_automatic_send_reserves_once(db):
+    w = await world(db)
+    op = await prepare(w)
+    view = await validate(w, op)
+    entered, resume = asyncio.Event(), asyncio.Event()
+    original = w.external.validate_notification_targets
+    async def paused(**kwargs):
+        entered.set()
+        await resume.wait()
+        return await original(**kwargs)
+    w.external.validate_notification_targets = paused
+    first = asyncio.create_task(send(w, op, view["confirmation_token"]))
+    await asyncio.wait_for(entered.wait(), 5)
+    try:
+        with pytest.raises((OperationNotSendableError, ReservedNotificationMutationError)):
+            await send(w, op, view["confirmation_token"])
+    finally:
+        resume.set()
+    await first
+    assert len(w.dispatched) == 1
+    assert {item.external_member_id for item in await w.repo.get_outbox_records("svc", op)} == set(w.members)
