@@ -1,24 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { adminApi, adminErrorMessage, type AdminJobSummary } from "../../lib/admin-api";
 import { AdminRouteFrame } from "../AdminRouteFrame";
 import { jobStatusLabel } from "../job-status";
+import { LoadingOverlay } from "../LoadingOverlay";
 
 export default function AdminJobsPage() {
   const [jobs, setJobs] = useState<AdminJobSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const request = useRef<AbortController | null>(null);
   function load() {
+    request.current?.abort();
     const controller = new AbortController();
+    request.current = controller;
     setLoading(true); setError("");
-    void adminApi.jobs(controller.signal).then(setJobs).catch((value) => {
-      if (!(value instanceof DOMException && value.name === "AbortError")) setError(adminErrorMessage(value));
-    }).finally(() => setLoading(false));
-    return controller;
+    void adminApi.jobs(controller.signal).then((items) => {
+      if (!controller.signal.aborted) setJobs(items);
+    }).catch((value) => {
+      if (!controller.signal.aborted && !(value instanceof DOMException && value.name === "AbortError")) setError(adminErrorMessage(value));
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
   }
-  useEffect(() => { const controller = load(); return () => controller.abort(); }, []);
+  useEffect(() => { load(); return () => request.current?.abort(); }, []);
   return <AdminRouteFrame title="求人一覧" description="業務システムから取得した求人を参照専用で表示します。">
+    <LoadingOverlay active={loading} />
     {loading && <div className="admin-info" role="status">求人を読み込んでいます。</div>}
     {error && <div className="admin-error" role="alert"><p>{error}</p><button className="admin-button secondary" type="button" onClick={load}>再読み込み</button></div>}
     {!loading && !error && jobs.length === 0 && <p className="admin-panel-empty">現在表示できる求人はありません。</p>}

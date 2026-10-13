@@ -75,6 +75,8 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
           width: "100%",
           maxWidth: "540px",
           maxHeight: "90vh",
+          boxSizing: "border-box",
+          overflowWrap: "anywhere",
           display: "flex",
           flexDirection: "column",
           position: "relative",
@@ -111,6 +113,7 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
         <div
           style={{
             overflowY: "auto",
+            minHeight: 0,
             padding: `${space.xl} ${space.lg} ${space.lg}`,
             flexGrow: 1,
           }}
@@ -134,6 +137,9 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
           <div
             style={{
               display: "flex",
+              flexWrap: "wrap",
+              maxHeight: "35vh",
+              overflowY: "auto",
               gap: space.md,
               padding: `${space.md} ${space.lg} ${space.xl}`,
               flexShrink: 0,

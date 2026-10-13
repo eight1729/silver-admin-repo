@@ -68,8 +68,8 @@ test("candidate panel uses a compact accessible filter menu and footer controls"
   assert.match(candidatePanel, /candidate-limit-note/);
   assert.doesNotMatch(candidatePanel, /candidate-filter-controls|candidate-filter-field/);
   const css = await readFile(new URL("./admin.css", import.meta.url), "utf8");
-  assert.match(css, /candidate-selection-table\{width:100%;min-width:0;[^}]*table-layout:fixed/);
-  assert.match(css, /candidate-table-wrapper\{overflow-x:visible/);
+  assert.match(css, /candidate-selection-table\{width:100%;min-width:560px;[^}]*table-layout:fixed/);
+  assert.match(css, /candidate-table-wrapper\{overflow:auto/);
   assert.match(css, /@media\(max-width:760px\)[\s\S]*candidate-table-wrapper\{overflow-x:auto\}/);
 });
 

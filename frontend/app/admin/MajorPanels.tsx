@@ -13,7 +13,7 @@ import type {
 } from "../lib/admin-api";
 import { formatBlockingReasons } from "./blocking-reasons";
 import { validationProblemReasons } from "./validation-problem-reasons";
-import { candidateFilters, filterCandidates, type CandidateFilterId } from "./candidate-filters";
+import { candidateFilters, filterCandidates, isMemberNumber, type CandidateFilterId } from "./candidate-filters";
 import { CENTER_DISPLAY_NAME_MAX_LENGTH, composeAdminMessage, notificationBody, notificationNotice, notificationTemplates, type SelectedTemplateId } from "./notification-templates";
 import { uiStatePresentation, type NotificationUiState, type WorkflowAction } from "./notification-ui-state";
 
@@ -76,14 +76,18 @@ export function CandidateSelectionPanel({ job, candidates, selected, notificatio
   const singleRecipient = maxRecipients === 1;
   const pageSize = 5;
   const [page, setPage] = useState(1);
-  useEffect(() => { setFilter("all"); setPage(1); }, [job.job_id, setFilter]);
-  useEffect(() => setPage(1), [filter]);
-  const visibleCandidates = filterCandidates(orderCandidates(candidates), filter);
+  const [minimumMemberNumber, setMinimumMemberNumber] = useState("");
+  useEffect(() => { setFilter("all"); setMinimumMemberNumber(""); setPage(1); }, [job.job_id, setFilter]);
+  useEffect(() => setPage(1), [filter, minimumMemberNumber]);
+  const invalidMinimum = minimumMemberNumber !== "" && !isMemberNumber(minimumMemberNumber);
+  const visibleCandidates = filterCandidates(orderCandidates(candidates), filter, minimumMemberNumber);
   const totalPages = Math.max(1, Math.ceil(visibleCandidates.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageCandidates = visibleCandidates.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const hiddenSelected = candidates.filter((candidate) => selected.has(candidate.member_id) && !visibleCandidates.some((visible) => visible.member_id === candidate.member_id));
   return <div className="major-panel-content">
+    <label className="candidate-number-filter">会員番号（以上）<input type="text" inputMode="numeric" value={minimumMemberNumber} aria-invalid={invalidMinimum} aria-describedby="candidate-number-help" onChange={(event) => setMinimumMemberNumber(event.target.value)} /></label>
+    <p id="candidate-number-help" className={invalidMinimum ? "field-help-error" : "candidate-limit-note"}>{invalidMinimum ? "半角数字で入力してください。" : "指定時は番号未取得・数字以外の会員を表示しません。選択済み会員は解除されません。"}</p>
     {busy && candidates.length === 0 && <div className="admin-info" role="status">候補会員を読み込んでいます。</div>}
     {error && <div className="admin-error" role="alert"><p>候補会員を取得できませんでした。</p><button className="admin-button secondary" type="button" disabled={busy} onClick={() => void retry()}>候補会員を再読み込み</button></div>}
     {!busy && !error && candidates.length === 0 && <div className="admin-panel-empty">この求人に表示できる候補会員はいません。</div>}

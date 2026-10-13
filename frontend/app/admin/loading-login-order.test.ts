@@ -77,7 +77,7 @@ test("display ordering preserves identifiers, ties, missing-number order and inp
   assert.deepEqual(rows, before);
   assert.equal(ordered[0], rows[2]);
   assert.deepEqual(orderCandidates(rows.filter(r => r.member_number == null)).map(r => r.member_id), ["external-a", "external-b"]);
-  assert.match(read("./MajorPanels.tsx"), /filterCandidates\(orderCandidates\(candidates\), filter\)/);
+  assert.match(read("./MajorPanels.tsx"), /filterCandidates\(orderCandidates\(candidates\), filter, minimumMemberNumber\)/);
   assert.match(read("./members/page.tsx"), /orderCandidates\(candidates\)\.map/);
 });
 

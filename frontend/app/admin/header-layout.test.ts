@@ -26,6 +26,7 @@ const shell = load("./AdminShell.tsx", {
   "./notification-templates": { DEFAULT_CENTER_DISPLAY_NAME: "検証用センター" },
   "./send-capability": { modePresentation: () => ({ tone: "blocked", label: "送信不可", detail: "確認してください" }) },
   "./AdminHeaderActions": actions, "./AdminHomeButton": home,
+  "./sidebar-focus": { attachSidebarFocus: () => () => {} },
 });
 
 function boundary(state: string, required = true, denied: number | null = null) {

@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import type { AdminLineSendMode } from "../lib/admin-api";
 import { DEFAULT_CENTER_DISPLAY_NAME } from "./notification-templates";
 import { modePresentation } from "./send-capability";
 import { AdminHeaderActions } from "./AdminHeaderActions";
 import { AdminHomeButton } from "./AdminHomeButton";
+import { attachSidebarFocus } from "./sidebar-focus";
 
 const navigationItems = [
   { label: "ダッシュボード", icon: "⌂", href: "/admin/dashboard" },
@@ -19,12 +20,19 @@ const navigationItems = [
 
 export function AdminShell({ mode, children }: { mode: AdminLineSendMode | null; children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuTrigger = useRef<HTMLButtonElement>(null);
+  const sidebar = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (menuOpen && sidebar.current && menuTrigger.current) {
+      return attachSidebarFocus(sidebar.current, menuTrigger.current, () => setMenuOpen(false));
+    }
+  }, [menuOpen]);
   const pathname = usePathname();
   const presentation = modePresentation(mode);
   return <div className="admin-workspace">
     <header className="admin-app-header">
       <div className="admin-app-title">
-        <button className="admin-menu-toggle" type="button" aria-label={menuOpen ? "メニューを閉じる" : "メニューを開く"} aria-expanded={menuOpen} aria-controls="admin-sidebar-navigation" onClick={() => setMenuOpen((current) => !current)}><span aria-hidden="true">☰</span></button>
+        <button ref={menuTrigger} className="admin-menu-toggle" type="button" aria-label={menuOpen ? "メニューを閉じる" : "メニューを開く"} aria-expanded={menuOpen} aria-controls="admin-sidebar-navigation" onClick={() => setMenuOpen((current) => !current)}><span aria-hidden="true">☰</span></button>
         <div><h1>スタッフ管理画面</h1><p>求人通知・マッチング管理</p></div>
       </div>
       <div className="admin-header-context" aria-label="現在の利用状況">
@@ -37,10 +45,11 @@ export function AdminShell({ mode, children }: { mode: AdminLineSendMode | null;
       </div>
     </header>
     <div className="admin-app-body">
-      <aside className={`admin-sidebar${menuOpen ? " is-open" : ""}`} id="admin-sidebar-navigation">
+      <aside ref={sidebar} hidden={!menuOpen} className={`admin-sidebar${menuOpen ? " is-open" : ""}`} id="admin-sidebar-navigation" role="dialog" aria-modal={menuOpen ? true : undefined} aria-label="スタッフ管理メニュー" tabIndex={-1}>
+        <button type="button" className="admin-sidebar-close" onClick={() => setMenuOpen(false)}>メニューを閉じる</button>
         <nav aria-label="スタッフ管理メニュー"><ul>{navigationItems.map((item) => { const current = pathname === item.href; return <li key={item.label}><a className={`admin-nav-item${current ? " is-current" : ""}`} href={item.href} aria-current={current ? "page" : undefined} onClick={() => setMenuOpen(false)}><span className="admin-nav-icon" aria-hidden="true">{item.icon}</span><span>{item.label}</span></a></li>; })}</ul></nav>
       </aside>
-      {menuOpen && <button className="admin-sidebar-backdrop" type="button" aria-label="メニューを閉じる" onClick={() => setMenuOpen(false)} />}
+      {menuOpen && <button className="admin-sidebar-backdrop" type="button" tabIndex={-1} aria-label="メニューを閉じる" onClick={() => setMenuOpen(false)} />}
       <div className="admin-content">{children}</div>
     </div>
   </div>;

@@ -40,6 +40,7 @@
 }
 
 .admin-workspace{min-height:100vh;background:#f4f7f5}
+.admin-workspace *,.admin-workspace *::before,.admin-workspace *::after{box-sizing:border-box}
 .admin-app-header{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;min-height:76px;padding:.75rem 1.5rem;background:#fff;border-bottom:1px solid #d8e1dc}
 .admin-header-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.5rem;margin-left:auto;max-width:100%}
 .admin-header-actions .admin-button{max-width:100%;white-space:normal}
@@ -56,9 +57,11 @@
 .admin-mode-mark{width:.65rem;height:.65rem;border-radius:50%;background:#6a7b73}
 .admin-mode--ready .admin-mode-mark{background:#237a53}
 .admin-mode--blocked .admin-mode-mark{background:#b24837}
-.admin-menu-toggle{display:none;border:1px solid #9db0a7;border-radius:8px;background:#fff;color:#1d2925;padding:.55rem;font-size:1.15rem;cursor:pointer}
-.admin-app-body{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:calc(100vh - 76px)}
-.admin-sidebar{position:sticky;top:76px;align-self:start;height:calc(100vh - 76px);padding:1.2rem .8rem;background:#173f34}
+.admin-menu-toggle{display:inline-grid;place-items:center;flex-shrink:0;border:1px solid #9db0a7;border-radius:8px;background:#fff;color:#1d2925;padding:.55rem;font-size:1.15rem;cursor:pointer}
+.admin-app-body{display:block;min-width:0}
+.admin-sidebar{position:fixed;inset:0 auto 0 0;z-index:50;width:min(82vw,280px);overflow-y:auto;overscroll-behavior:contain;padding:1.2rem .8rem;background:#173f34}
+.admin-sidebar[hidden]{display:none}
+.admin-sidebar-close{display:block;margin:0 0 1rem auto;padding:.65rem;border:1px solid #afc2ba;border-radius:8px;background:transparent;color:#fff;font:inherit;cursor:pointer}
 .admin-sidebar ul{display:grid;gap:.3rem;margin:0;padding:0;list-style:none}
 .admin-nav-item{box-sizing:border-box;display:flex;align-items:center;gap:.8rem;width:100%;min-height:50px;padding:.7rem .8rem;border:0;border-radius:9px;background:transparent;color:#dfeae5;text-align:left;font:inherit;text-decoration:none}
 .admin-nav-item small{display:block;margin-top:.15rem;color:#afc2ba;font-size:.67rem}
@@ -85,7 +88,7 @@
 .admin-panel-body>.admin-card{border-color:#e3e9e6;box-shadow:none}
 .admin-panel-empty{margin:0;padding:1.1rem;border:1px dashed #b8c7c0;border-radius:10px;background:#f7f9f8;color:#62736c;line-height:1.6}
 .admin-panel-summary{display:flex;align-items:center;justify-content:space-between;gap:1rem}
-.admin-sidebar-backdrop{display:none}
+.admin-sidebar-backdrop{position:fixed;inset:0;z-index:40;display:block;border:0;background:rgba(13,35,29,.48)}
 .admin-button:focus-visible,.admin-nav-item:focus-visible,.admin-menu-toggle:focus-visible,.admin-sidebar-backdrop:focus-visible,.admin-link:focus-visible{outline:3px solid #f1b24a;outline-offset:3px}
 
 @media(max-width:1359px){.admin-upper-workspace{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -100,9 +103,6 @@
 .admin-mode small{display:none}
 .admin-menu-toggle{display:inline-grid;place-items:center}
 .admin-app-body{display:block}
-.admin-sidebar{position:fixed;top:0;left:0;z-index:50;width:min(82vw,280px);height:100vh;box-sizing:border-box;transform:translateX(-105%);transition:transform .2s ease}
-.admin-sidebar.is-open{transform:translateX(0)}
-.admin-sidebar-backdrop{position:fixed;inset:0;z-index:40;display:block;border:0;background:rgba(13,35,29,.48)}
 .admin-upper-workspace,.admin-left-stack,.admin-lower-workspace{grid-template-columns:minmax(0,1fr);grid-template-rows:auto}
 .admin-left-stack{grid-column:auto}
 .admin-panel-summary{align-items:flex-start;flex-direction:column}
@@ -180,8 +180,8 @@
 .candidate-filter-popover{position:absolute;top:calc(100% + .35rem);right:0;z-index:20;display:grid;min-width:170px;padding:.35rem;border:1px solid #cdd9d3;border-radius:9px;background:#fff;box-shadow:0 8px 24px rgba(25,55,43,.14)}
 .candidate-filter-popover button{display:flex;align-items:center;justify-content:space-between;gap:.75rem;width:100%;padding:.48rem .55rem;border:0;border-radius:6px;background:transparent;color:#293d34;text-align:left;cursor:pointer}
 .candidate-filter-popover button:hover,.candidate-filter-popover button:focus-visible{background:#eef7f2}.candidate-filter-popover button.is-current{color:#176b49;font-weight:800}
-.candidate-table-wrapper{overflow-x:visible;overflow-y:auto;max-width:100%;border:1px solid #dce5e0;border-radius:9px}
-.candidate-selection-table{width:100%;min-width:0;border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:.72rem}
+.candidate-table-wrapper{overflow:auto;max-width:100%;border:1px solid #dce5e0;border-radius:9px}
+.candidate-selection-table{width:100%;min-width:560px;border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:.72rem}
 .candidate-selection-table th,.candidate-selection-table td{padding:.38rem .24rem;border-bottom:1px solid #e1e8e4;text-align:left;vertical-align:middle;overflow-wrap:anywhere}
 .candidate-selection-table thead th{position:sticky;top:0;z-index:1;padding-inline:.22rem;background:#f4f7f5;color:#485b53;font-size:.69rem;font-weight:700}
 .candidate-selection-table tbody tr{background:#fff;cursor:pointer;transition:background-color .15s ease}
@@ -294,3 +294,18 @@
 
 .admin-button.compact{padding:.42rem .65rem;font-size:.75rem}
 .message-readonly-actions{display:flex;justify-content:flex-end;margin-top:.75rem}.message-readonly-actions .admin-button{min-height:42px}
+
+/* Keep long labels and controls inside their panel at PC widths as well. */
+.admin-app-title,.admin-header-context,.admin-app-title>div{min-width:0;max-width:100%}
+.admin-app-title h1,.admin-header-context strong{overflow-wrap:anywhere}
+.admin-header-context,.admin-panel-header,.admin-panel-tools,.admin-panel-heading-line,.candidate-footer-actions{flex-wrap:wrap}
+.admin-panel-count{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.admin-panel-title-row>div,.selection-item-heading h3{min-width:0;overflow-wrap:anywhere}
+.selection-item-heading,.notification-message-heading{flex-wrap:wrap}
+.admin-button{max-width:100%;overflow-wrap:anywhere}
+.candidate-primary-compact{white-space:normal}
+.candidate-pagination,.candidate-pagination>div{flex-wrap:wrap;min-width:0;max-width:100%}
+.candidate-pagination>div{max-height:8rem;overflow:auto}
+.candidate-number-filter{display:grid;gap:.35rem;max-width:20rem;font-size:.8rem;font-weight:700}
+.candidate-number-filter input{width:100%;min-width:0;padding:.55rem;border:1px solid #aebbb6;border-radius:8px;font:inherit}
+.admin-sidebar-close:focus-visible{outline:3px solid #f1b24a;outline-offset:3px}
