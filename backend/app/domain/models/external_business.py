@@ -111,6 +111,8 @@ class CandidateMember:
     line_subject: str | None = None
     preference_summary: str | None = None
     member_number: str | None = None
+    # Current DB strength only; None is unrated, independently of eligibility.
+    recommendation_level: int | None = None
 
     def __post_init__(self) -> None:
         if self.eligible and self.reason_codes:

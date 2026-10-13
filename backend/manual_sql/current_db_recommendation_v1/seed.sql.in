@@ -1,0 +1,149 @@
+-- INSERT-only, sumida test fixtures. No trigger disabling, UPDATE, DELETE or LINE data.
+BEGIN;
+DO $guard$
+BEGIN
+  IF current_setting('silver.fixture_consent', true) IS DISTINCT FROM 'sumida-test-only-v1'
+     OR current_setting('silver.fixture_database', true) IS DISTINCT FROM current_database() THEN
+    RAISE EXCEPTION 'Explicit test-only consent and database guard required';
+  END IF;
+END $guard$;
+LOCK TABLE public.members, public.jobs, public.job_recommendation_flags IN SHARE ROW EXCLUSIVE MODE;
+
+CREATE TEMP TABLE _rec_member_manifest(id uuid PRIMARY KEY, member_code text UNIQUE, full_name text, hours integer) ON COMMIT DROP;
+INSERT INTO _rec_member_manifest VALUES
+{{MEMBERS}};
+CREATE TEMP TABLE _rec_job_manifest(id uuid PRIMARY KEY, job_code text UNIQUE, title text, days integer) ON COMMIT DROP;
+INSERT INTO _rec_job_manifest VALUES
+{{JOBS}};
+CREATE TEMP TABLE _rec_rating_manifest(member_code text, job_code text, level integer CHECK(level BETWEEN 1 AND 5), PRIMARY KEY(member_code, job_code)) ON COMMIT DROP;
+INSERT INTO _rec_rating_manifest VALUES
+{{RATINGS}};
+
+DO $baseline$
+BEGIN
+  -- Numeric comparison supports preserved zero-padded legacy codes. No renumbering.
+  IF EXISTS (SELECT 1 FROM public.members WHERE center_code='sumida' AND
+             (member_code IS NULL OR member_code !~ '^[0-9]+$')) THEN
+    RAISE EXCEPTION 'Unexpected nonnumeric sumida member code';
+  END IF;
+  IF (SELECT count(*) FROM public.members WHERE center_code='sumida' AND substring(member_code from '^[0-9]+$')::numeric BETWEEN 1 AND 30) <> 30
+     OR (SELECT count(DISTINCT substring(member_code from '^[0-9]+$')::numeric) FROM public.members WHERE center_code='sumida' AND substring(member_code from '^[0-9]+$')::numeric BETWEEN 1 AND 30) <> 30
+     OR EXISTS (SELECT 1 FROM public.members m WHERE m.center_code='sumida' AND
+                NOT (substring(m.member_code from '^[0-9]+$')::numeric BETWEEN 1 AND 30) AND
+                NOT EXISTS (SELECT 1 FROM _rec_member_manifest f WHERE f.id=m.id AND f.member_code=m.member_code)) THEN
+    RAISE EXCEPTION 'Expected original codes 1..30 and only owned fixture members';
+  END IF;
+  IF (SELECT count(*) FROM public.jobs WHERE center_code='sumida' AND
+      job_code IN (SELECT 'TEST-JOB-' || lpad(n::text, 3, '0') FROM generate_series(1,10) n)
+      AND status='published') <> 10
+     OR EXISTS (SELECT 1 FROM public.jobs j WHERE j.center_code='sumida' AND
+          j.job_code NOT IN (SELECT 'TEST-JOB-' || lpad(n::text,3,'0') FROM generate_series(1,10) n)
+          AND NOT EXISTS (SELECT 1 FROM _rec_job_manifest f WHERE f.id=j.id AND f.job_code=j.job_code)) THEN
+    RAISE EXCEPTION 'Expected original 10 published jobs and only owned fixture jobs';
+  END IF;
+  IF (SELECT count(*) FROM public.job_recommendation_flags r WHERE r.center_code='sumida' AND
+      NOT EXISTS (SELECT 1 FROM _rec_job_manifest f WHERE f.id=r.job_id)) <> 65
+     OR EXISTS (SELECT 1 FROM public.job_recommendation_flags r WHERE r.center_code='sumida' AND
+       NOT EXISTS (SELECT 1 FROM _rec_job_manifest f WHERE f.id=r.job_id) AND
+       (r.is_recommended IS DISTINCT FROM true OR r.recommendation_level IS NOT NULL OR
+        NOT EXISTS (SELECT 1 FROM public.members m WHERE m.id=r.member_id AND m.center_code='sumida' AND substring(m.member_code from '^[0-9]+$')::numeric BETWEEN 1 AND 30) OR
+        NOT EXISTS (SELECT 1 FROM public.jobs j WHERE j.id=r.job_id AND j.center_code='sumida' AND
+          j.job_code IN (SELECT 'TEST-JOB-' || lpad(n::text,3,'0') FROM generate_series(1,10) n)))) THEN
+    RAISE EXCEPTION 'Expected 65 unchanged legacy true/unrated recommendations';
+  END IF;
+END $baseline$;
+
+-- Preserve complete legacy rows, including timestamps and otherwise unused columns.
+CREATE TEMP VIEW _rec_legacy_view AS
+ SELECT 'member' AS kind, to_jsonb(m) AS payload FROM public.members m
+ WHERE center_code='sumida' AND substring(member_code from '^[0-9]+$')::numeric BETWEEN 1 AND 30
+ UNION ALL
+ SELECT 'job', to_jsonb(j) FROM public.jobs j WHERE center_code='sumida' AND
+ job_code IN (SELECT 'TEST-JOB-' || lpad(n::text,3,'0') FROM generate_series(1,10) n)
+ UNION ALL
+ SELECT 'flag', to_jsonb(r) FROM public.job_recommendation_flags r WHERE center_code='sumida' AND
+ NOT EXISTS (SELECT 1 FROM _rec_job_manifest f WHERE f.id=r.job_id);
+CREATE TEMP TABLE _rec_legacy_snapshot ON COMMIT DROP AS SELECT * FROM _rec_legacy_view;
+CREATE TEMP TABLE _rec_base ON COMMIT DROP AS
+ SELECT max(created_at) AS ts FROM public.members WHERE center_code='sumida' AND substring(member_code from '^[0-9]+$')::numeric BETWEEN 1 AND 30;
+
+CREATE TEMP TABLE _rec_members ON COMMIT DROP AS
+ SELECT f.id, f.member_code, f.full_name, 'sumida'::text AS center_code,
+        NULL::text AS phone_mobile_normalized,
+        b.ts + f.hours * interval '1 hour' AS created_at,
+        b.ts + f.hours * interval '1 hour' AS updated_at
+ FROM _rec_member_manifest f CROSS JOIN _rec_base b;
+CREATE TEMP TABLE _rec_jobs ON COMMIT DROP AS
+ SELECT f.id, f.job_code, f.title, 'Dedicated recommendation fixture v1'::text AS summary,
+        'TEST ONLY'::text AS location_text, 'TEST ONLY'::text AS work_date_text,
+        'published'::text AS status, 'sumida'::text AS center_code,
+        b.ts + f.days * interval '1 day' AS created_at,
+        b.ts + f.days * interval '1 day' AS updated_at
+ FROM _rec_job_manifest f CROSS JOIN _rec_base b;
+
+DO $ownership$
+BEGIN
+  IF EXISTS (SELECT 1 FROM _rec_members f JOIN public.members m
+       ON m.id=f.id OR (m.center_code=f.center_code AND m.member_code=f.member_code)
+       WHERE ROW(m.id,m.member_code,m.full_name,m.center_code,m.phone_mobile_normalized,m.created_at,m.updated_at)
+       IS DISTINCT FROM ROW(f.id,f.member_code,f.full_name,f.center_code,f.phone_mobile_normalized,f.created_at,f.updated_at)) THEN
+    RAISE EXCEPTION 'Member fixture ownership/payload conflict; nothing overwritten';
+  END IF;
+  IF EXISTS (SELECT 1 FROM _rec_jobs f JOIN public.jobs j
+       ON j.id=f.id OR (j.center_code=f.center_code AND j.job_code=f.job_code)
+       WHERE ROW(j.id,j.job_code,j.title,j.summary,j.location_text,j.work_date_text,j.status,j.center_code,j.created_at,j.updated_at)
+       IS DISTINCT FROM ROW(f.id,f.job_code,f.title,f.summary,f.location_text,f.work_date_text,f.status,f.center_code,f.created_at,f.updated_at)) THEN
+    RAISE EXCEPTION 'Job fixture ownership/payload conflict; nothing overwritten';
+  END IF;
+END $ownership$;
+
+INSERT INTO public.members(id,member_code,full_name,center_code,phone_mobile_normalized,created_at,updated_at)
+ SELECT f.* FROM _rec_members f WHERE NOT EXISTS (SELECT 1 FROM public.members m WHERE m.id=f.id);
+INSERT INTO public.jobs(id,job_code,title,summary,location_text,work_date_text,status,center_code,created_at,updated_at)
+ SELECT f.* FROM _rec_jobs f WHERE NOT EXISTS (SELECT 1 FROM public.jobs j WHERE j.id=f.id);
+
+CREATE TEMP TABLE _rec_flags ON COMMIT DROP AS
+ SELECT m.id AS member_id, j.id AS job_id, 'sumida'::text AS center_code,
+        true AS is_recommended, r.level AS recommendation_level,
+        b.ts + interval '100 days' AS created_at, b.ts + interval '100 days' AS updated_at
+ FROM _rec_rating_manifest r JOIN public.members m ON m.center_code='sumida' AND substring(m.member_code from '^[0-9]+$')::numeric=substring(r.member_code from '^[0-9]+$')::numeric
+ JOIN _rec_jobs j ON j.job_code=r.job_code CROSS JOIN _rec_base b;
+DO $flags$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.job_recommendation_flags r JOIN _rec_job_manifest j ON j.id=r.job_id
+     WHERE NOT EXISTS (SELECT 1 FROM _rec_flags f WHERE
+       ROW(r.member_id,r.job_id,r.center_code,r.is_recommended,r.recommendation_level,r.created_at,r.updated_at)
+       IS NOT DISTINCT FROM ROW(f.member_id,f.job_id,f.center_code,f.is_recommended,f.recommendation_level,f.created_at,f.updated_at))) THEN
+    RAISE EXCEPTION 'Recommendation fixture ownership/payload conflict; nothing overwritten';
+  END IF;
+END $flags$;
+INSERT INTO public.job_recommendation_flags(member_id,job_id,center_code,is_recommended,recommendation_level,created_at,updated_at)
+ SELECT f.* FROM _rec_flags f WHERE NOT EXISTS (SELECT 1 FROM public.job_recommendation_flags r
+  WHERE r.center_code=f.center_code AND r.job_id=f.job_id AND r.member_id=f.member_id);
+
+DO $verify$
+BEGIN
+  IF EXISTS (SELECT 1 FROM _rec_members f WHERE NOT EXISTS (SELECT 1 FROM public.members m
+       WHERE ROW(m.id,m.member_code,m.full_name,m.center_code,m.phone_mobile_normalized,m.created_at,m.updated_at)
+       IS NOT DISTINCT FROM ROW(f.id,f.member_code,f.full_name,f.center_code,f.phone_mobile_normalized,f.created_at,f.updated_at)))
+     OR EXISTS (SELECT 1 FROM _rec_jobs f WHERE NOT EXISTS (SELECT 1 FROM public.jobs j
+       WHERE ROW(j.id,j.job_code,j.title,j.summary,j.location_text,j.work_date_text,j.status,j.center_code,j.created_at,j.updated_at)
+       IS NOT DISTINCT FROM ROW(f.id,f.job_code,f.title,f.summary,f.location_text,f.work_date_text,f.status,f.center_code,f.created_at,f.updated_at)))
+     OR EXISTS (SELECT 1 FROM _rec_flags f WHERE NOT EXISTS (SELECT 1 FROM public.job_recommendation_flags r
+       WHERE ROW(r.member_id,r.job_id,r.center_code,r.is_recommended,r.recommendation_level,r.created_at,r.updated_at)
+       IS NOT DISTINCT FROM ROW(f.member_id,f.job_id,f.center_code,f.is_recommended,f.recommendation_level,f.created_at,f.updated_at))) THEN
+    RAISE EXCEPTION 'Inserted fixture differs from manifest; transaction rolled back';
+  END IF;
+  IF (SELECT count(*) FROM public.members WHERE center_code='sumida') <> 120
+     OR (SELECT count(*) FROM public.jobs WHERE center_code='sumida') <> 13
+     OR (SELECT count(*) FROM public.job_recommendation_flags WHERE center_code='sumida') <> 425
+     OR (SELECT count(*) FROM _rec_flags) <> 360 THEN
+    RAISE EXCEPTION 'Unexpected fixture counts; transaction rolled back';
+  END IF;
+  IF EXISTS ((SELECT * FROM _rec_legacy_view EXCEPT ALL SELECT * FROM _rec_legacy_snapshot)
+       UNION ALL (SELECT * FROM _rec_legacy_snapshot EXCEPT ALL SELECT * FROM _rec_legacy_view)) THEN
+    RAISE EXCEPTION 'Legacy row changed; transaction rolled back';
+  END IF;
+END $verify$;
+DROP VIEW _rec_legacy_view;
+COMMIT;

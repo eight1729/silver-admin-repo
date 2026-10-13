@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, Text, Uuid, and_, column, func, or_, select, table
+from sqlalchemy import Boolean, DateTime, Integer, Text, Uuid, and_, column, func, or_, select, table
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -41,7 +41,8 @@ _jobs = table(
 )
 _recommendations = table(
     "job_recommendation_flags", column("member_id", Uuid), column("job_id", Uuid),
-    column("center_code", Text), column("is_recommended", Boolean), schema="public",
+    column("center_code", Text), column("is_recommended", Boolean),
+    column("recommendation_level", Integer), schema="public",
 )
 
 
@@ -225,14 +226,16 @@ class CurrentDbExternalBusinessGateway:
     ) -> list[CandidateMember]:
         center = self._center(external_organization_id)
         job_id = self._job_id(external_job_id)
-        rows = await self._rows(select(_members.c.id, _members.c.full_name, _members.c.member_code).select_from(
+        rows = await self._rows(select(_members.c.id, _members.c.full_name, _members.c.member_code,
+                                     _recommendations.c.recommendation_level).select_from(
             _members.join(_recommendations, _recommendations.c.member_id == _members.c.id)
             .join(_jobs, _jobs.c.id == _recommendations.c.job_id)
         ).where(_jobs.c.id == job_id, _jobs.c.center_code == center,
                 _members.c.center_code == center, _recommendations.c.center_code == center,
                 _recommendations.c.is_recommended.is_(True)).order_by(_members.c.id))
         return [CandidateMember(str(row["id"]), row["full_name"], True, (), None,
-                                member_number=row["member_code"]) for row in rows]
+                                member_number=row["member_code"],
+                                recommendation_level=row["recommendation_level"]) for row in rows]
 
     async def validate_notification_targets(
         self, *, external_organization_id: str, external_job_id: str,

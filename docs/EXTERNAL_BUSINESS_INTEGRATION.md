@@ -158,9 +158,13 @@ SQLAlchemyの参照用table clauseはすべてschema `public`。
 | public.job_recommendation_flags | member_id, job_id | UUID（Uuid） |
 | public.job_recommendation_flags | center_code | Text |
 | public.job_recommendation_flags | is_recommended | Boolean |
+| public.job_recommendation_flags | recommendation_level | Integer / nullable（手動migration適用後、1〜5または未評価NULL） |
 
 `id`は安定した一意ID、推薦は会員・求人への整合した参照であることが期待される。
 Clause自体にPK / FK / UNIQUE / NOT NULLのDDL定義はない。
+推薦level列の追加手順・テスト専用fixture・適用前提は
+[Current DB manual SQL](../backend/manual_sql/current_db_recommendation_v1/README.md)参照。
+新adapterの配置前にlevel列migrationが必要。従来bool trueをlevel5に変換しない。
 `job_code`は宣言・全求人列SELECTには含まれるが、ID検索・domain projectionには使用しない。
 求人titleはdomain上の必須文字列。summary / location / schedule等は後述のnullable projectionに従う。
 NULL statusや未定義statusは現在のenum変換でUNKNOWNとなる。DBで許容する値・NULLの実態は未確認。
@@ -206,6 +210,9 @@ is_recommendedがtrueの場合だけ返す。Flagだけscope一致でも他cente
 候補者検索も同じ3 tableのscopeとtrue flagを使い、members.id ASC。
 CandidateはID、full_name、eligible=true、空reason_codesを返し、
 match_rank / line_subject / preference_summaryはNone。
+CandidateMemberのrecommendation_levelのみ同名列から投影する。NULLは未評価。
+level 1〜4もbool=trueなら従来どおり候補で、通知適格性の条件を変えない。
+このfieldはCurrent DB domain内のみで、HTTP providerや公開API契約は拡張しない。
 候補者検索自体ではjob status / revisionを検証しない。最終適格性は通知validationで判定する。
 
 ### Job mapping

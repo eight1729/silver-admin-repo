@@ -43,6 +43,28 @@ J1, J2, J3, J4 = [UUID(int=i) for i in (11, 12, 13, 14)]
 NOW = datetime(2026, 1, 2, 3, 4, 5, 123456, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize("level", [None, 1, 2, 3, 4, 5])
+async def test_recommendation_strength_preserves_manual_eligibility(db, level):
+    gateway, engine, tables = db
+    flags = tables["job_recommendation_flags"]
+    engine.connection.execute(flags.update().where(flags.c.job_id == J1)
+                              .values(recommendation_level=level))
+    candidates = await gateway.list_candidate_members(external_organization_id="org-a", external_job_id=str(J1))
+    assert len(candidates) == 1
+    assert candidates[0].recommendation_level == level
+    assert candidates[0].eligible
+    result = await gateway.validate_notification_targets(external_organization_id="org-a",
+        external_job_id=str(J1), expected_job_version=NOW.isoformat(), external_member_ids=[str(M1)])
+    assert result.members[0].eligible
+    # Even strength 5 must not revive an explicitly revoked manual candidate.
+    engine.connection.execute(flags.update().where(flags.c.job_id == J1)
+                              .values(is_recommended=False, recommendation_level=5))
+    assert await gateway.list_candidate_members(external_organization_id="org-a", external_job_id=str(J1)) == []
+    result = await gateway.validate_notification_targets(external_organization_id="org-a",
+        external_job_id=str(J1), expected_job_version=NOW.isoformat(), external_member_ids=[str(M1)])
+    assert not result.members[0].eligible
+
+
 class QueryEngine:
     def __init__(self, connection):
         self.connection = connection
