@@ -85,6 +85,7 @@ export function adminErrorMessage(error: unknown): string {
   if (!(error instanceof AdminApiError)) return "処理に失敗しました。もう一度お試しください。";
   if (error.code === "api_not_configured") return "Backend URLが設定されていません。ローカル環境の設定を確認してください。";
   if (error.code === "external_system_unavailable") return "求人・候補情報を確認できませんでした。しばらくして再確認してください。";
+  if (error.code === "external_target_limit_exceeded") return "外部業務APIで確認できる対象は最大500人です。選択人数を500人以下に減らして再検証してください。送信可能人数は別の制限に従います。";
   if (error.code === "staff_auth_unavailable") return "スタッフ認証を確認できませんでした。";
   if (error.status === 401) return "認証が必要です。ログイン状態を確認してください。";
   if (error.status === 403) return "この操作を行う権限、またはサービス利用権限がありません。";

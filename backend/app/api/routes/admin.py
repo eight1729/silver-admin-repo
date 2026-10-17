@@ -34,6 +34,7 @@ from app.domain.enums.enums import DeliveryStatus, OperationStatus
 from app.domain.errors.errors import (
     ExternalJobNotFoundError,
     ExternalSystemUnavailableError,
+    ExternalTargetLimitExceededError,
     QueueError,
 )
 from app.domain.models.staff import AuthenticatedStaff
@@ -82,6 +83,8 @@ def _translate(exc: Exception) -> None:
     if isinstance(exc, ReservedNotificationMutationError):
         raise HTTPException(status_code=409, detail={"error": "operation_conflict"})
     exc = normalize_admin_exception(exc)
+    if isinstance(exc, ExternalTargetLimitExceededError):
+        raise HTTPException(status_code=422, detail={"error": "external_target_limit_exceeded"})
     if isinstance(exc, AdminExternalSystemUnavailableError):
         raise HTTPException(
             status_code=503, detail={"error": "external_system_unavailable"}
