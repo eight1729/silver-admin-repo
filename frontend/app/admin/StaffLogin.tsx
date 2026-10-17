@@ -15,7 +15,7 @@ export function StaffLogin() {
     let active = true;
     renderStaffSignIn(button.current, (accepted) => {
       if (!active) return;
-      if (accepted) window.location.replace("/");
+      if (accepted) window.location.replace("/admin/dashboard");
       else setFailed(true);
     }).catch(() => { if (active) setFailed(true); });
     return () => { active = false; };

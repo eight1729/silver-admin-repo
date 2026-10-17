@@ -4,13 +4,14 @@ These table clauses describe reads only: no shared metadata, reflection or DDL.
 They are not the schema contract of a future production business provider.
 """
 
-from app.core.jobs_diagnostics import jobs_point, jobs_failure
+from app.core.jobs_diagnostics import jobs_failure
 
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from uuid import UUID
+import re
 
-from sqlalchemy import Boolean, DateTime, Text, Uuid, and_, column, func, or_, select, table
+from sqlalchemy import Boolean, DateTime, Integer, Text, Uuid, and_, column, func, or_, select, table
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -31,17 +32,20 @@ from app.domain.ports.organization_service_scope import OrganizationServiceScope
 
 _members = table(
     "members", column("id", Uuid), column("member_code", Text),
-    column("full_name", Text), column("center_code", Text), schema="public",
+    column("full_name", Text), column("center_code", Text),
+    column("phone_mobile_normalized", Text), schema="public",
 )
 _jobs = table(
     "jobs", column("id", Uuid), column("job_code", Text), column("title", Text), column("summary", Text),
     column("location_text", Text), column("work_date_text", Text),
     column("status", Text), column("updated_at", DateTime(timezone=True)),
+    column("created_at", DateTime(timezone=True)),
     column("center_code", Text), schema="public",
 )
 _recommendations = table(
     "job_recommendation_flags", column("member_id", Uuid), column("job_id", Uuid),
-    column("center_code", Text), column("is_recommended", Boolean), schema="public",
+    column("center_code", Text), column("is_recommended", Boolean),
+    column("recommendation_level", Integer), schema="public",
 )
 
 
@@ -92,6 +96,13 @@ class CurrentDbExternalBusinessGateway:
         return updated, updated.isoformat()
 
     @staticmethod
+    def _created_at(row) -> datetime:
+        created = row["created_at"]
+        if not isinstance(created, datetime) or created.utcoffset() is None:
+            raise ExternalSystemUnavailableError("Current DB job registration date is unavailable")
+        return created.astimezone(timezone.utc)
+
+    @staticmethod
     def _status(row) -> JobStatus:
         try:
             return JobStatus(row["status"])
@@ -105,6 +116,7 @@ class CurrentDbExternalBusinessGateway:
             external_job_id=str(row["id"]), title=row["title"], summary=row["summary"],
             work_location_summary=row["location_text"], work_schedule_summary=row["work_date_text"],
             application_deadline=None, status=cls._status(row), version=version, updated_at=updated,
+            created_at=cls._created_at(row),
         )
 
     async def verify_member(
@@ -126,12 +138,17 @@ class CurrentDbExternalBusinessGateway:
         self, *, external_organization_id: str, external_member_id: str,
     ) -> ExternalMemberSummary:
         center = self._center(external_organization_id)
-        rows = await self._rows(select(_members.c.id, _members.c.full_name).where(
+        rows = await self._rows(select(_members.c.id, _members.c.full_name, _members.c.member_code,
+            func.substr(_members.c.phone_mobile_normalized,
+                        func.length(_members.c.phone_mobile_normalized) - 3, 4).label("mobile_last4")).where(
             _members.c.center_code == center, _members.c.id == self._member_id(external_member_id),
         ))
         if not rows:
             raise ExternalMemberNotFoundError("member was not found")
-        return ExternalMemberSummary(str(rows[0]["id"]), rows[0]["full_name"])
+        row = rows[0]
+        last4 = row["mobile_last4"]
+        return ExternalMemberSummary(str(row["id"]), row["full_name"], row["member_code"],
+            last4 if isinstance(last4, str) and re.fullmatch(r"[0-9]{4}", last4) else None)
 
     async def list_recommended_jobs(
         self, *, external_organization_id: str, external_member_id: str,
@@ -167,7 +184,7 @@ class CurrentDbExternalBusinessGateway:
             external_job_id=str(row["id"]), title=row["title"], description=row["summary"] or "",
             work_location=row["location_text"], work_schedule_text=row["work_date_text"],
             application_deadline=None, required_conditions=(), status=self._status(row),
-            version=version, updated_at=updated, staff_notes=None,
+            version=version, updated_at=updated, staff_notes=None, created_at=self._created_at(row),
         )
 
     # These capabilities have no confirmed mapping in this four-use-case slice.
@@ -183,7 +200,6 @@ class CurrentDbExternalBusinessGateway:
         stage = "search_jobs_center_mapping"
         try:
             center = self._center(external_organization_id)
-            jobs_point("current_db_business", "search_jobs_start", "center_mapping_found=true")
             stage = "search_jobs_query_build"
             conditions = [_jobs.c.center_code == center]
             if query.statuses:
@@ -199,22 +215,16 @@ class CurrentDbExternalBusinessGateway:
             where = and_(*conditions)
             stage = "search_jobs_count_query"
             count_rows = await self._rows(select(func.count().label("total")).select_from(_jobs).where(where))
-            jobs_point("current_db_business", "search_jobs_count_loaded", "count_loaded=true")
             stage = "search_jobs_count_conversion"
             total = int(count_rows[0]["total"]) if count_rows else 0
             stage = "search_jobs_rows_query"
             rows = await self._rows(select(_jobs).where(where).order_by(_jobs.c.updated_at.desc(), _jobs.c.id)
                                     .offset((query.page - 1) * query.page_size).limit(query.page_size))
-            jobs_point("current_db_business", "search_jobs_rows_loaded", "rows_loaded=true")
             stage = "job_summary"
-            # One pair for the whole batch, including empty results and later-row failures.
-            jobs_point("current_db_business", "job_summary_start")
             items = tuple(self._job_summary(row) for row in rows)
-            jobs_point("current_db_business", "job_summary_complete")
             stage = "search_jobs_response"
             result = PagedExternalJobs(items, query.page, query.page_size,
                                       total, (query.page * query.page_size) < total)
-            jobs_point("current_db_business", "search_jobs_complete")
             return result
         except Exception as exc:
             jobs_failure("current_db_business", stage, exc)
@@ -225,14 +235,18 @@ class CurrentDbExternalBusinessGateway:
     ) -> list[CandidateMember]:
         center = self._center(external_organization_id)
         job_id = self._job_id(external_job_id)
-        rows = await self._rows(select(_members.c.id, _members.c.full_name, _members.c.member_code).select_from(
+        rows = await self._rows(select(_members.c.id, _members.c.full_name, _members.c.member_code,
+                                     _recommendations.c.recommendation_level).select_from(
             _members.join(_recommendations, _recommendations.c.member_id == _members.c.id)
             .join(_jobs, _jobs.c.id == _recommendations.c.job_id)
         ).where(_jobs.c.id == job_id, _jobs.c.center_code == center,
                 _members.c.center_code == center, _recommendations.c.center_code == center,
                 _recommendations.c.is_recommended.is_(True)).order_by(_members.c.id))
-        return [CandidateMember(str(row["id"]), row["full_name"], True, (), None,
-                                member_number=row["member_code"]) for row in rows]
+        candidates = [CandidateMember(str(row["id"]), row["full_name"], True, (), None,
+                                member_number=row["member_code"],
+                                recommendation_level=row["recommendation_level"]) for row in rows]
+        return candidates
+
 
     async def validate_notification_targets(
         self, *, external_organization_id: str, external_job_id: str,

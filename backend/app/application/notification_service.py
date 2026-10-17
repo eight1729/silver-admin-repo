@@ -11,6 +11,8 @@ import logging
 from typing import Awaitable, Callable
 from uuid import UUID, uuid4, uuid5
 
+from app.application.automatic_selection import automatic_context, context_snapshot, confirmation_identity
+
 from app.domain.enums.enums import (
     DeliveryStatus,
     JobStatus,
@@ -110,6 +112,7 @@ class CreateNotificationOperationCommand:
     introduction: str
     note: str
     created_by_staff_id: str
+    automatic_selection: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +141,7 @@ class ReplaceNotificationTargetsCommand:
     operation_id: UUID
     targets: tuple[NotificationTargetInput, ...]
     staff_id: str | None = None
+    reinclude_member_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +164,7 @@ class SendNotificationOperationCommand:
     operation_id: UUID
     staff_id: str
     request_id: str
+    confirmation_token: str | None = None
 
 
 # ── Result types ──────────────────────────────────────────────────────────────
@@ -268,6 +273,24 @@ def _validation_snapshot(summary: NotificationValidationSummary) -> dict:
     }
 
 
+def _expected(operation):
+    return {"expected_operation": operation} if automatic_context(operation) is not None else {}
+
+
+def _snapshot_for(operation, summary):
+    snapshot = _validation_snapshot(summary)
+    context = automatic_context(operation)
+    if context is not None:
+        context = dict(context)
+        excluded = dict(context["excluded"])
+        for item in summary.target_results:
+            if item.selected and item.delivery_disposition is not ValidationDisposition.SEND:
+                excluded.setdefault(item.member_id, {"reason": item.reason or "member_ineligible", "disposition": item.delivery_disposition.value})
+        context["excluded"] = excluded
+        snapshot["automatic_selection"] = context
+    return snapshot
+
+
 # ── Service ───────────────────────────────────────────────────────────────────
 
 
@@ -292,6 +315,7 @@ class NotificationService:
         persist_line_subjects: bool = True,
         reservation_guard: Callable[[str, int], Awaitable[None]] | None = None,
         selected_recipient_limit: int | None = None,
+        linkage_lookup: Callable[[str, tuple[str, ...]], Awaitable[dict[str, bool]]] | None = None,
     ) -> None:
         self._repository = repository
         self._external_business_gateway = external_business_gateway
@@ -308,6 +332,7 @@ class NotificationService:
         self._persist_line_subjects = persist_line_subjects
         self._reservation_guard = reservation_guard
         self._selected_recipient_limit = selected_recipient_limit
+        self._linkage_lookup = linkage_lookup
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -387,7 +412,8 @@ class NotificationService:
             completed_at=None,
             message_version=1,
             message_hash=_message_hash(message),
-            validation_snapshot=None,
+            validation_snapshot={"automatic_selection": {"initial_count": 0, "initialized": False,
+                "revision": str(self._uuid()), "excluded": {}}} if command.automatic_selection else None,
         )
         stored = await self._repository.create_operation_with_audit(
             operation,
@@ -434,7 +460,7 @@ class NotificationService:
             message_hash=_message_hash(message),
             status=OperationStatus.DRAFT,
             validated_at=None,
-            validation_snapshot=None,
+            validation_snapshot=context_snapshot(operation),
         )
         now = self._now()
         updated = await self._repository.update_operation_with_audit(
@@ -448,6 +474,7 @@ class NotificationService:
                 {"sections": sections},
                 now,
             ),
+            **_expected(operation),
         )
         return updated
 
@@ -479,6 +506,20 @@ class NotificationService:
                     target.line_subject if self._persist_line_subjects else None,
                 )
             )
+        context = automatic_context(operation)
+        snapshot = None
+        if context is not None:
+            context = dict(context)
+            selected_ids = {t.member_id for t in records if t.selected}
+            if not set(command.reinclude_member_ids) <= selected_ids & set(context["excluded"]):
+                raise InvalidNotificationCommandError("invalid explicit re-selection")
+            context["excluded"] = {k: v for k, v in context["excluded"].items()
+                if k in selected_ids and k not in command.reinclude_member_ids}
+            if not context["initialized"]:
+                context["initial_count"] = len(selected_ids)
+                context["initialized"] = True
+            context["revision"] = str(self._uuid())
+            snapshot = {"automatic_selection": context}
         updated, targets = await self._repository.replace_targets_with_operation_and_audit(
             command.service_id,
             command.operation_id,
@@ -487,7 +528,7 @@ class NotificationService:
                 operation,
                 status=OperationStatus.DRAFT,
                 validated_at=None,
-                validation_snapshot=None,
+                validation_snapshot=snapshot,
             ),
             self._audit_event(
                 operation,
@@ -499,6 +540,7 @@ class NotificationService:
                 },
                 now,
             ),
+            **_expected(operation),
         )
         return NotificationOperationResult(updated, targets)
 
@@ -529,6 +571,7 @@ class NotificationService:
                 {"request_id": command.request_id},
                 now,
             ),
+            **_expected(operation),
         )
 
         if not selected:
@@ -545,19 +588,19 @@ class NotificationService:
                 False,
             )
             await self._finish_validation(
-                operation, summary, OperationStatus.DRAFT, targets, command
+                validating, summary, OperationStatus.DRAFT, targets, command
             )
             return summary
 
         gateway = self._external_business_gateway
         if gateway is None:
-            await self._restore_status(operation, original_status)
+            await self._restore_status(validating, original_status)
             raise InvalidNotificationCommandError(
                 "external business gateway is required"
             )
 
         if self._external_business_organization_id_resolver is None:
-            await self._restore_status(operation, original_status)
+            await self._restore_status(validating, original_status)
             raise OperationNotSendableError(
                 "organization identifier cannot be resolved"
             )
@@ -568,13 +611,20 @@ class NotificationService:
             not isinstance(external_organization_id, str)
             or not external_organization_id.strip()
         ):
-            await self._restore_status(operation, original_status)
+            await self._restore_status(validating, original_status)
             raise OperationNotSendableError(
                 "organization identifier cannot be resolved"
             )
         external_organization_id = external_organization_id.strip()
 
         try:
+            if automatic_context(operation) is not None:
+                if self._linkage_lookup is None:
+                    raise ExternalSystemUnavailableError("LINE linkage is unavailable")
+                linkage = await self._linkage_lookup(command.service_id, tuple(t.member_id for t in selected))
+                if set(linkage) != {t.member_id for t in selected} or any(type(v) is not bool for v in linkage.values()):
+                    raise ExternalSystemUnavailableError("LINE linkage is incomplete")
+                targets = tuple(replace(t, line_linked=linkage[t.member_id]) if t.selected else t for t in targets)
             job = await gateway.get_job_detail(
                 external_organization_id=external_organization_id,
                 external_job_id=operation.job_id,
@@ -589,6 +639,13 @@ class NotificationService:
                 expected_job_version=operation.job_version or "",
                 external_member_ids=[target.member_id for target in selected],
             )
+            if automatic_context(operation) is not None:
+                returned = [item.external_member_id for item in validation.members]
+                candidate_ids = [item.external_member_id for item in candidates]
+                if (job.external_job_id != operation.job_id or validation.external_job_id != operation.job_id
+                        or not set(returned) <= {t.member_id for t in selected}
+                        or len(returned) != len(set(returned)) or len(candidate_ids) != len(set(candidate_ids))):
+                    raise ExternalSystemUnavailableError("validation identities are inconsistent")
         except ExternalJobNotFoundError:
             summary = replace(
                 self._summary(
@@ -597,7 +654,8 @@ class NotificationService:
                     False,
                     False,
                     _message_valid(operation.message),
-                    (),
+                    tuple(NotificationTargetValidationItem(t.member_id, True, t.line_linked, False,
+                        ValidationDisposition.BLOCK, "job_not_found") for t in selected) if automatic_context(operation) is not None else (),
                     now,
                     "job_not_found",
                     False,
@@ -606,7 +664,7 @@ class NotificationService:
                 selected_target_count=len(selected),
             )
             await self._finish_validation(
-                operation, summary, OperationStatus.READY, targets, command
+                validating, summary, OperationStatus.READY, targets, command
             )
             return summary
         except ExternalSystemUnavailableError as exc:
@@ -618,7 +676,8 @@ class NotificationService:
                     False,
                     False,
                     _message_valid(operation.message),
-                    (),
+                    tuple(NotificationTargetValidationItem(t.member_id, True, t.line_linked, False,
+                        ValidationDisposition.BLOCK, reason) for t in selected) if automatic_context(operation) is not None else (),
                     now,
                     reason,
                     False,
@@ -630,7 +689,7 @@ class NotificationService:
                 operation,
                 status=OperationStatus.BLOCKED_EXTERNAL_SYSTEM,
                 validated_at=now,
-                validation_snapshot=_validation_snapshot(summary),
+                validation_snapshot=_snapshot_for(operation, summary),
             )
             await self._repository.update_operation_with_audit(
                 command.service_id,
@@ -643,10 +702,11 @@ class NotificationService:
                     {"blocking_reason": reason, "request_id": command.request_id},
                     now,
                 ),
+                **_expected(validating),
             )
             return summary
         except Exception:
-            await self._restore_status(operation, original_status)
+            await self._restore_status(validating, original_status)
             raise
 
         job_valid = job.status is JobStatus.PUBLISHED and validation.job_eligible
@@ -672,6 +732,9 @@ class NotificationService:
             operation, targets, validation, candidates, now
         )
         reconfirm = reconfirm or target_difference
+        if automatic_context(operation) is not None and (not job_valid or not version_matches or not _message_valid(operation.message)):
+            items = tuple(replace(item, eligible=False, delivery_disposition=ValidationDisposition.BLOCK,
+                reason=blocking_reason or "empty_notification_message") if item.selected else item for item in items)
         sends = sum(
             item.delivery_disposition is ValidationDisposition.SEND for item in items
         )
@@ -706,7 +769,7 @@ class NotificationService:
             reconfirm,
         )
         await self._finish_validation(
-            operation, summary, OperationStatus.READY, updated_targets, command
+            validating, summary, OperationStatus.READY, updated_targets, command
         )
         return summary
 
@@ -726,6 +789,10 @@ class NotificationService:
             disposition = ValidationDisposition.SKIP
             if not target.selected:
                 reason = "not_selected"
+            elif automatic_context(operation) is not None and target.member_id in automatic_context(operation)["excluded"]:
+                exclusion = automatic_context(operation)["excluded"][target.member_id]
+                reason = exclusion["reason"]
+                disposition = ValidationDisposition(exclusion["disposition"])
             elif not target.line_linked:
                 reason = "line_not_linked"
             else:
@@ -817,7 +884,7 @@ class NotificationService:
             operation,
             status=status,
             validated_at=summary.validated_at,
-            validation_snapshot=_validation_snapshot(summary),
+            validation_snapshot=_snapshot_for(operation, summary),
         )
         await self._repository.replace_targets_with_operation_and_audit(
             command.service_id,
@@ -838,6 +905,7 @@ class NotificationService:
                 },
                 summary.validated_at,
             ),
+            **_expected(operation),
         )
 
     async def _restore_status(self, operation, status):
@@ -845,6 +913,7 @@ class NotificationService:
             operation.service_id,
             operation.operation_id,
             replace(operation, status=status),
+            **_expected(operation),
         )
 
     @staticmethod
@@ -911,6 +980,15 @@ class NotificationService:
         ):
             return operation
 
+        confirmed = operation
+        confirmed_targets = await self._repository.get_targets(command.service_id, command.operation_id)
+        auto = automatic_context(confirmed)
+        if auto is not None:
+            if (not command.confirmation_token or confirmed.validated_at is None
+                    or command.confirmation_token != confirmation_identity(confirmed, confirmed_targets)):
+                raise OperationNotSendableError("staff confirmation is stale or missing")
+            confirmed_send = {i["member_id"] for i in (confirmed.validation_snapshot or {}).get("target_results", ())
+                              if i["selected"] and i["delivery_disposition"] == "send"}
         # 3. Always re-validate before sending
         validate_cmd = ValidateNotificationOperationCommand(
             service_id=command.service_id,
@@ -928,8 +1006,16 @@ class NotificationService:
         # 4. Reject if validation did not clear the operation for sending
         if (operation.status is not OperationStatus.READY
                 or operation.validated_at != summary.validated_at
-                or operation.validation_snapshot != freeze_mapping(_validation_snapshot(summary))):
+                or operation.validation_snapshot != freeze_mapping(_snapshot_for(operation, summary))):
             raise OperationNotSendableError("operation changed after validation")
+        if auto is not None:
+            fresh_send = {i.member_id for i in summary.target_results if i.selected and i.delivery_disposition is ValidationDisposition.SEND}
+            fresh_selected = {i.member_id for i in summary.target_results if i.selected}
+            if (fresh_send != confirmed_send or fresh_selected != {t.member_id for t in confirmed_targets if t.selected}
+                    or operation.message_hash != confirmed.message_hash or operation.message_version != confirmed.message_version
+                    or operation.job_id != confirmed.job_id or operation.job_version != confirmed.job_version
+                    or automatic_context(operation)["revision"] != auto["revision"]):
+                raise OperationNotSendableError("confirmed recipients or message changed; reconfirm required")
         if not summary.can_proceed or summary.requires_staff_reconfirmation:
             now = self._now()
             reason = (

@@ -16,7 +16,7 @@ function compile(source: string, globals: Record<string, any> = {}, mocks: Recor
   const code = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020,
   } }).outputText;
-  runInNewContext(code, { module, exports: module.exports, DOMException,
+  runInNewContext(code, { module, exports: module.exports, DOMException, track: (_label: string, action: () => Promise<unknown>) => action(),
     require: (id: string) => id.endsWith(".css") ? {} : mocks[id] ?? require(id), ...globals });
   return module.exports;
 }
@@ -34,8 +34,8 @@ test("overlay renders only while active, with spinner, live status and keyboard 
     useEffect: (value: typeof effect) => { effect = value; } } }).LoadingOverlay;
   assert.equal(component({ active: false }), null);
   assert.equal(effect!(), undefined);
-  const html = renderToStaticMarkup(component({ active: true }));
-  assert.match(html, /Loading\.\.\./);
+  const html = renderToStaticMarkup(component({ active: true, status: "候補会員とLINE連携状態を確認中…" }));
+  assert.match(html, /候補会員とLINE連携状態を確認中…/);
   assert.match(html, /admin-loading-spinner/);
   assert.match(html, /role="status".*aria-live="polite".*aria-busy="true"/);
   const cleanup = effect!();
@@ -73,11 +73,11 @@ test("display ordering preserves identifiers, ties, missing-number order and inp
     { member_id: "uuid-2", member_number: "0002" }, { member_id: "uuid-tie", member_number: "0001" }];
   const before = [...rows];
   const ordered = orderCandidates(rows);
-  assert.deepEqual(ordered.map(r => r.member_id), ["uuid-1", "uuid-tie", "uuid-2", "uuid-3", "external-a", "external-b"]);
+  assert.deepEqual(ordered.map(r => r.member_id), ["uuid-3", "uuid-2", "uuid-1", "uuid-tie", "external-a", "external-b"]);
   assert.deepEqual(rows, before);
-  assert.equal(ordered[0], rows[2]);
+  assert.equal(ordered[0], rows[0]);
   assert.deepEqual(orderCandidates(rows.filter(r => r.member_number == null)).map(r => r.member_id), ["external-a", "external-b"]);
-  assert.match(read("./MajorPanels.tsx"), /filterCandidates\(orderCandidates\(candidates\), filter\)/);
+  assert.match(read("./MajorPanels.tsx"), /filterCandidates\(orderCandidates\(candidates, selected\), filter, minimumMemberNumber\)/);
   assert.match(read("./members/page.tsx"), /orderCandidates\(candidates\)\.map/);
 });
 
@@ -89,7 +89,7 @@ for (const fail of [false, true]) {
   test(`initial jobs loading clears on ${fail ? "failure" : "success"}`, async () => {
     const states: boolean[] = [];
     const start = page.indexOf("  const loadJobs = useCallback(");
-    const end = page.indexOf("  }, []);", start);
+    const end = page.indexOf("  }, [track]);", start);
     const code = page.slice(start, end).replace("useCallback(", "") + "  };\nexports.run = loadJobs;";
     const { run } = compile(code, { setLoading: (v: boolean) => states.push(v), setJobsError: noop,
       clearFeedback: noop, setJobs: noop, showError: noop,
@@ -150,7 +150,7 @@ test("overlay combines major network states, not polling or local selection", ()
 test("cancelled initial request cannot dismiss loading for a newer request", async () => {
   const states: boolean[] = [];
   const start = page.indexOf("  const loadJobs = useCallback(");
-  const end = page.indexOf("  }, []);", start);
+  const end = page.indexOf("  }, [track]);", start);
   const code = page.slice(start, end).replace("useCallback(", "") + "  }; exports.run = loadJobs;";
   const { run } = compile(code, { setLoading: (v: boolean) => states.push(v), setJobsError: noop,
     clearFeedback: noop, setJobs: noop, showError: noop,

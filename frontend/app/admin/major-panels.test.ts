@@ -42,7 +42,7 @@ test("staging candidate selection visibly enforces one recipient", async () => {
   assert.match(text, /連携済み/);
   assert.match(text, /通知可能/);
   assert.match(candidatePanel, /<table className="candidate-selection-table">/);
-  for (const heading of ["会員ID", "氏名", "希望条件", "LINE連携", "通知可否"]) assert.match(candidatePanel, new RegExp(`<th scope="col">${heading}</th>`));
+  for (const heading of ["会員番号", "氏名", "希望条件", "LINE連携", "通知可否"]) assert.match(candidatePanel, new RegExp(`<th scope="col">${heading}</th>`));
   assert.match(candidatePanel, /type="checkbox"/);
   assert.match(candidatePanel, /name="admin-selected-candidate"/);
   assert.match(candidatePanel, /candidate\.preference_summary/);
@@ -68,8 +68,8 @@ test("candidate panel uses a compact accessible filter menu and footer controls"
   assert.match(candidatePanel, /candidate-limit-note/);
   assert.doesNotMatch(candidatePanel, /candidate-filter-controls|candidate-filter-field/);
   const css = await readFile(new URL("./admin.css", import.meta.url), "utf8");
-  assert.match(css, /candidate-selection-table\{width:100%;min-width:0;[^}]*table-layout:fixed/);
-  assert.match(css, /candidate-table-wrapper\{overflow-x:visible/);
+  assert.match(css, /candidate-selection-table\{width:100%;min-width:560px;[^}]*table-layout:fixed/);
+  assert.match(css, /candidate-table-wrapper\{overflow:auto/);
   assert.match(css, /@media\(max-width:760px\)[\s\S]*candidate-table-wrapper\{overflow-x:auto\}/);
 });
 

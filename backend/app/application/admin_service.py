@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from app.core.jobs_diagnostics import jobs_point, jobs_failure
+from app.core.jobs_diagnostics import jobs_failure
+from app.application.automatic_selection import automatic_context, confirmation_identity, select_automatic_members
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Callable
 from uuid import UUID
 
@@ -24,6 +26,8 @@ from app.domain.enums.notification_type import NotificationType
 from app.domain.errors.errors import (
     ExternalBusinessNotConfiguredError,
     ExternalJobNotFoundError,
+    ExternalMemberNotFoundError,
+    ExternalSystemUnavailableError,
 )
 from app.domain.errors.admin_notification_repository import (
     OperationNotFoundError,
@@ -88,6 +92,11 @@ class AdminCandidate:
     line_subject: str | None = None
     preference_summary: str | None = None
     member_number: str | None = None
+    recommendation_level: int | None = None
+
+
+JOB_PAGE_SIZE = 200
+MAX_JOB_PAGES = 100
 
 
 class AdminApplicationService:
@@ -149,16 +158,53 @@ class AdminApplicationService:
 
     async def list_jobs(self, service_id: str) -> tuple[ExternalJobSummary, ...]:
         stage = "list_jobs_scope"
-        jobs_point("admin_application", "list_jobs_start")
         try:
             scope = self._business_scope(service_id)
             stage = "list_jobs_provider"
-            result = await self._external.search_jobs(
-                external_organization_id=scope.organization_id, query=JobSearchQuery()
-            )
+            # Collect the complete provider result before ordering. Never expose a
+            # successful partial list when pagination is inconsistent or bounded out.
+            collected = []
+            seen = set()
+            expected_total = None
+            for page in range(1, MAX_JOB_PAGES + 1):
+                result = await self._external.search_jobs(
+                    external_organization_id=scope.organization_id,
+                    query=JobSearchQuery(page=page, page_size=JOB_PAGE_SIZE),
+                )
+                if (result.page != page or result.page_size != JOB_PAGE_SIZE
+                        or len(result.items) > JOB_PAGE_SIZE):
+                    raise AdminDependencyUnavailableError("Job pagination is inconsistent")
+                if result.total_count is not None:
+                    if result.total_count < 0 or (expected_total is not None
+                            and expected_total != result.total_count):
+                        raise AdminDependencyUnavailableError("Job pagination changed")
+                    expected_total = result.total_count
+                for item in result.items:
+                    if item.external_job_id in seen:
+                        raise AdminDependencyUnavailableError("Job pagination repeated an identity")
+                    if item.created_at is not None and (
+                            not isinstance(item.created_at, datetime) or item.created_at.utcoffset() is None):
+                        raise AdminDependencyUnavailableError("Job registration date is invalid")
+                    seen.add(item.external_job_id)
+                    collected.append(item)
+                if expected_total is not None and len(collected) > expected_total:
+                    raise AdminDependencyUnavailableError("Job pagination is inconsistent")
+                if not result.has_next:
+                    if expected_total is not None and len(collected) != expected_total:
+                        raise AdminDependencyUnavailableError("Job pagination is incomplete")
+                    break
+                if not result.items or (expected_total is not None and len(collected) >= expected_total):
+                    raise AdminDependencyUnavailableError("Job pagination made no progress")
+            else:
+                raise AdminDependencyUnavailableError("Job pagination limit exceeded")
             stage = "list_jobs_response"
-            items = tuple(result.items)
-            jobs_point("admin_application", "list_jobs_complete")
+            # Stable identity tie-break; unknown dates remain last, without fallback.
+            collected.sort(key=lambda item: item.external_job_id)
+            collected.sort(key=lambda item: (
+                item.created_at is not None,
+                item.created_at or datetime.min.replace(tzinfo=timezone.utc),
+            ), reverse=True)
+            items = tuple(collected)
             return items
         except Exception as exc:
             jobs_failure("admin_application", stage, exc)
@@ -187,6 +233,8 @@ class AdminApplicationService:
             linkage = await self._lookup_linkages(
                 scope, (item.external_member_id for item in candidates)
             )
+        if len({item.external_member_id for item in candidates}) != len(candidates):
+            raise AdminDependencyUnavailableError("duplicate candidate identities")
         return tuple(
             self._candidate(
                 item,
@@ -194,6 +242,73 @@ class AdminApplicationService:
             )
             for item in candidates
         )
+
+    async def confirmed_linkages(self, service_id, member_ids):
+        if self._line_internal_client is None:
+            raise ExternalSystemUnavailableError("LINE linkage is unavailable")
+        try:
+            return await self._lookup_linkages(self._line_scope(service_id), member_ids)
+        except AdminDependencyUnavailableError:
+            raise ExternalSystemUnavailableError("LINE linkage is unavailable") from None
+
+    async def automatic_selection(self, service_id, job_id):
+        job = await self.get_job(service_id, job_id)
+        if job.status.value != "published":
+            raise ValueError("only published jobs can be selected")
+        if self._line_internal_client is None:
+            raise AdminDependencyUnavailableError("canonical LINE linkage is required")
+        candidates = await self.list_candidates(service_id, job_id)
+        try:
+            selected = select_automatic_members(candidates)
+        except ValueError:
+            raise AdminDependencyUnavailableError("automatic selection data is incomplete") from None
+        return {"selected_member_ids": selected,
+                "reason": None if selected else "評価5・LINE連携済みの選択可能な会員がいません。未評価は対象外です。"}
+
+    async def confirmation(self, service_id, operation_id):
+        result = await self.get_operation(service_id, operation_id)
+        operation, targets = result.operation, result.targets
+        context = automatic_context(operation)
+        if context is None:
+            raise ValueError("automatic operation required")
+        snapshot = operation.validation_snapshot or {}
+        rows = {i["member_id"]: i for i in snapshot.get("target_results", ()) if i["selected"]}
+        scope = self._business_scope(service_id)
+        items = []
+        for target in targets:
+            if not target.selected:
+                continue
+            row = rows.get(target.member_id)
+            member = None
+            try:
+                member = await self._external.get_member_summary(external_organization_id=scope.organization_id,
+                                                               external_member_id=target.member_id)
+            except ExternalMemberNotFoundError:
+                pass  # Unknown attributes remain explicit; never invent identity data.
+            if member is not None and member.external_member_id != target.member_id:
+                raise AdminDependencyUnavailableError("member identity mismatch")
+            disposition = row["delivery_disposition"] if row else "block"
+            items.append(dict(member_id=target.member_id, member_number=member.member_number if member else None,
+                display_name=member.display_label if member else None,
+                mobile_phone_last4=member.mobile_phone_last4 if member else None,
+                disposition=disposition, reason=row["reason"] if row else snapshot.get("blocking_reason") or "revalidation_required"))
+        # Reject a concurrent edit/validation while resolving display attributes.
+        current = await self.get_operation(service_id, operation_id)
+        token = confirmation_identity(operation, targets)
+        if token != confirmation_identity(current.operation, current.targets):
+            raise OperationNotSendableError("confirmation changed")
+        sendable = sum(i["disposition"] == "send" for i in items)
+        valid = (operation.status.value == "ready" and operation.validated_at is not None
+                 and snapshot.get("can_proceed") is True and not snapshot.get("requires_staff_reconfirmation")
+                 and set(rows) == {t.member_id for t in targets if t.selected} and sendable > 0
+                 and operation.send_requested_at is None)
+        limit = self.notification_service._selected_recipient_limit
+        return dict(operation_id=operation_id, initial_count=context["initial_count"], selected_count=len(items),
+            sendable_count=sendable, excluded_count=len(items)-sendable,
+            message=dict(greeting=operation.message.greeting, introduction=operation.message.introduction, note=operation.message.note),
+            targets=items, confirmation_token=token if valid else None,
+            requires_revalidation=not valid, selected_recipient_limit=limit,
+            can_send=valid and (limit is None or len(items) <= limit))
 
     async def _lookup_linkages(self, scope, member_ids):
         ids = tuple(dict.fromkeys(member_ids))
@@ -231,6 +346,7 @@ class AdminApplicationService:
             ),
             preference_summary=item.preference_summary,
             member_number=item.member_number,
+            recommendation_level=item.recommendation_level,
         )
 
     def _line_scope(self, service_id: str) -> ServiceOrganizationScope:
@@ -261,8 +377,13 @@ class AdminApplicationService:
         greeting: str,
         introduction: str,
         note: str,
+        automatic_selection: bool = False,
     ):
         job = await self.get_job(service_id, job_id)
+        if automatic_selection:
+            selection = await self.automatic_selection(service_id, job_id)
+            if not selection["selected_member_ids"]:
+                raise ValueError("no automatic targets")
         return await self.notification_service.create_operation(
             CreateNotificationOperationCommand(
                 service_id=service_id,
@@ -273,6 +394,7 @@ class AdminApplicationService:
                 introduction=introduction,
                 note=note,
                 created_by_staff_id=staff_id,
+                automatic_selection=automatic_selection,
             )
         )
 
@@ -304,14 +426,26 @@ class AdminApplicationService:
         operation_id: UUID,
         selected_member_ids: tuple[str, ...],
         staff_id: str,
+        reinclude_member_ids: tuple[str, ...] = (),
     ) -> NotificationOperationResult:
         if len(set(selected_member_ids)) != len(selected_member_ids):
             raise ValueError("duplicate selected member")
         operation = (await self.notification_service.get_operation(
             service_id, operation_id
         )).operation
+        context = automatic_context(operation)
+        if context is not None and not context["initialized"]:
+            authoritative = await self.automatic_selection(service_id, operation.job_id)
+            if set(selected_member_ids) != set(authoritative["selected_member_ids"]):
+                raise OperationNotSendableError("automatic selection changed; select again")
         candidates = await self.list_candidates(service_id, operation.job_id)
         by_id = {item.member_id: item for item in candidates}
+        if context is not None:
+            previous = (await self.get_operation(service_id, operation_id)).targets
+            for target in previous:
+                if target.selected and target.member_id in selected_member_ids and target.member_id not in by_id:
+                    by_id[target.member_id] = AdminCandidate(target.member_id, "取得不可", False, False, "member_no_longer_candidate")
+            candidates = tuple(by_id.values())
         if any(member_id not in by_id for member_id in selected_member_ids):
             raise ValueError("selected member is not a job candidate")
         selected = set(selected_member_ids)
@@ -330,7 +464,7 @@ class AdminApplicationService:
         )
         return await self.notification_service.replace_targets(
             ReplaceNotificationTargetsCommand(
-                service_id, operation_id, targets, staff_id
+                service_id, operation_id, targets, staff_id, reinclude_member_ids
             )
         )
 
@@ -347,15 +481,20 @@ class AdminApplicationService:
         )).operation
         if operation.status is OperationStatus.BLOCKED_EXTERNAL_SYSTEM:
             raise AdminExternalSystemUnavailableError("external validation unavailable")
+        if (automatic_context(operation) is not None and result.requires_staff_reconfirmation
+                and result.job_valid and result.version_matches and result.eligible_count > 0 and result.invalid_count == 0):
+            result = await self.notification_service.validate_operation(
+                ValidateNotificationOperationCommand(service_id, operation_id, staff_id, request_id))
         return result
 
     async def send(
-        self, *, service_id: str, operation_id: UUID, staff_id: str, request_id: str
+        self, *, service_id: str, operation_id: UUID, staff_id: str, request_id: str,
+        confirmation_token: str | None = None,
     ):
         try:
             return await self.notification_service.send_operation(
                 SendNotificationOperationCommand(
-                    service_id, operation_id, staff_id, request_id
+                    service_id, operation_id, staff_id, request_id, confirmation_token
                 )
             )
         except OperationNotSendableError:

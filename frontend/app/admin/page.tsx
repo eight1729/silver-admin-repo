@@ -1,5 +1,8 @@
 "use client";
 
+import { useLoadingTasks } from "./use-loading-tasks";
+import { notificationEntryUrl } from "./automatic-workflow";
+import { NotificationEntry } from "./NotificationEntry";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { orderCandidates } from "./candidate-order";
 
@@ -11,7 +14,7 @@ import {
   type AdminJobDetail, type AdminJobSummary, type AdminMessage,
   type AdminLineSendMode, type AdminOperation, type AdminValidation, type NotificationType,
 } from "../lib/admin-api";
-import { ADMIN_HOME_EVENT } from "./AdminHomeButton";
+import { JobsNavigationGuard } from "./JobsNavigationGuard";
 import { createDeliveryRefresh } from "./delivery-refresh";
 import { jobStatusLabel } from "./job-status";
 import { toggleCandidateSelection } from "./candidate-selection";
@@ -37,6 +40,11 @@ const initialMessage: AdminMessage = {
 };
 
 export default function AdminPage() {
+  return <NotificationEntry manual={(jobId, operationId) => <ManualAdminPage initialJobId={jobId} resumeOperationId={operationId} />} />;
+}
+
+function ManualAdminPage({ initialJobId, resumeOperationId }: { initialJobId: string | null; resumeOperationId: string | null }) {
+  const { status: loadingStatus, track } = useLoadingTasks();
   const [step, setStep] = useState<Step>("jobs");
   const [jobs, setJobs] = useState<AdminJobSummary[]>([]);
   const [job, setJob] = useState<AdminJobDetail | null>(null);
@@ -134,39 +142,53 @@ export default function AdminPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshOperationId, refreshEnabled]);
 
+  const entryApplied = useRef(false);
+  useEffect(() => {
+    if (!initialJobId || loading || restoringOperation || entryApplied.current) return;
+    entryApplied.current = true;
+    const entryJob = jobs.find((item) => item.job_id === initialJobId);
+    if (!entryJob || entryJob.status !== "published") { setError("指定された求人は選択できません。求人一覧から選び直してください。"); return; }
+    requestJobSelection(initialJobId);
+    // Apply URL intent once; later edits remain owned by the existing workflow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialJobId, jobs, loading, restoringOperation]);
+
   const showError = (value: unknown) => setError(adminErrorMessage(value));
   const clearFeedback = () => { setError(""); setSuccess(""); };
 
   const loadJobs = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setJobsError(false); clearFeedback();
-    try { setJobs(await adminApi.jobs(signal)); }
+    try { const result = await track("求人一覧を取得中…", () => adminApi.jobs(signal)); if (!signal?.aborted) setJobs(result); }
     catch (e) { if (!(e instanceof DOMException && e.name === "AbortError")) { setJobsError(true); showError(e); } }
     finally { if (!signal?.aborted) setLoading(false); }
-  }, []);
+  }, [track]);
 
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
     void loadJobs(controller.signal);
     setModeLoading(true);
-    void adminApi.lineSendMode(controller.signal).then((mode) => {
+    void track("送信設定を確認中…", () => adminApi.lineSendMode(controller.signal)).then((mode) => {
       if (active) setLineSendMode(mode);
     }).catch((e) => {
       if (active && !(e instanceof DOMException && e.name === "AbortError")) showError(e);
     }).finally(() => { if (active) setModeLoading(false); });
-    const saved = sessionStorage.getItem(STORAGE_KEY);
-    const savedSelected = sessionStorage.getItem(SELECTED_KEY);
+    const saved = resumeOperationId;
+    const savedSelected = saved && sessionStorage.getItem(STORAGE_KEY) === saved ? sessionStorage.getItem(SELECTED_KEY) : null;
+    let pendingSelected: string[] = [];
     if (savedSelected) {
-      try { setSelected(new Set(JSON.parse(savedSelected) as string[])); } catch { sessionStorage.removeItem(SELECTED_KEY); }
+      try { const value: unknown = JSON.parse(savedSelected); if (Array.isArray(value) && value.every(id => typeof id === "string")) pendingSelected = value; }
+      catch { sessionStorage.removeItem(SELECTED_KEY); }
     }
     if (saved) {
       setRestoringOperation(true);
       void restoreAdminOperation({
         operationId: saved,
-        getOperation: (id) => adminApi.operation(id, controller.signal),
+        getOperation: (id) => track("通知の状態を取得中…", () => adminApi.operation(id, controller.signal)),
         onOperationRestored: (op, restoredStep) => {
           if (!active) return;
           const restoredNotice = notificationNotice(op.message);
+          setSelected(new Set(op.target_count === 0 && !op.send_requested_at ? pendingSelected : op.selected_member_ids ?? []));
           setOperation(op); setMessage(op.message); setNotificationType(op.notification_type);
           setNoticeDraft(restoredNotice); setAppliedNotice(restoredNotice);
           setSelectedJobId(op.job_id); setStep(restoredStep);
@@ -174,11 +196,11 @@ export default function AdminPage() {
           setValidation(null); setValidationSnapshot(null);
           setValidationInvalidation(op.status === "ready" ? "再読み込み後は安全のため再検証が必要です。" : null);
         },
-        getJob: (id) => adminApi.job(id, controller.signal),
-        getCandidates: (id) => adminApi.candidates(id, controller.signal),
+        getJob: (id) => track("求人詳細を取得中…", () => adminApi.job(id, controller.signal)),
+        getCandidates: (id) => track("候補会員とLINE連携状態を確認中…", () => adminApi.candidates(id, controller.signal)),
         deliveryActions: {
           sendOperation: adminApi.send,
-          getDeliveries: (id) => adminApi.deliveries(id, controller.signal),
+          getDeliveries: (id) => track("送信結果を取得中…", () => adminApi.deliveries(id, controller.signal)),
         },
         isNotFound: (e) => e instanceof AdminApiError && e.status === 404,
         removeStoredOperationId: () => sessionStorage.removeItem(STORAGE_KEY),
@@ -198,7 +220,11 @@ export default function AdminPage() {
         .finally(() => { if (active) setRestoringOperation(false); });
     } else setRestoringOperation(false);
     return () => { active = false; controller.abort(); };
-  }, [loadJobs]);
+  }, [loadJobs, resumeOperationId]);
+
+  useEffect(() => {
+    if (operation) window.history.replaceState(null, "", notificationEntryUrl("manual", null, operation.operation_id));
+  }, [operation?.operation_id]);
 
   useEffect(() => {
     if (!isLiveMode(lineSendMode) || !canAttemptSend(lineSendMode) || !selectedJobId) {
@@ -209,7 +235,7 @@ export default function AdminPage() {
     }
     const controller = new AbortController();
     const requestId = ++linkRequestSequence.current;
-    void adminApi.notificationLink(selectedJobId, controller.signal)
+    void track("求人リンクを取得中…", () => adminApi.notificationLink(selectedJobId, controller.signal))
       .then((result) => {
         if (requestId !== linkRequestSequence.current) return;
         const previous = notificationLinkRef.current;
@@ -249,13 +275,9 @@ export default function AdminPage() {
     setDeliveriesOperationId(null); setSessionHistory([]);
     notificationLinkRef.current = null; setNotificationLink(null);
     sessionStorage.removeItem(STORAGE_KEY); sessionStorage.removeItem(SELECTED_KEY);
+    window.history.replaceState(null, "", notificationEntryUrl("manual"));
   }
 
-  useEffect(() => {
-    const handler = () => returnToJobs();
-    window.addEventListener(ADMIN_HOME_EVENT, handler);
-    return () => window.removeEventListener(ADMIN_HOME_EVENT, handler);
-  }, [returnToJobs]);
 
   function requestJobSelection(jobId: string) {
     if (jobId === selectedJobId || busy || workflowAction === "sending") return;
@@ -280,7 +302,7 @@ export default function AdminPage() {
     const requestId = ++jobRequestSequence.current;
     setBusy(true); clearFeedback(); setDetailError(false); setCandidatesError(false);
     try {
-      const [detailResult, candidateResult] = await Promise.allSettled([adminApi.job(jobId), adminApi.candidates(jobId)]);
+      const [detailResult, candidateResult] = await Promise.allSettled([track("求人詳細を取得中…", () => adminApi.job(jobId)), track("候補会員とLINE連携状態を確認中…", () => adminApi.candidates(jobId))]);
       if (requestId !== jobRequestSequence.current) return null;
       if (detailResult.status === "fulfilled") setJob(detailResult.value);
       else { setDetailError(true); showError(detailResult.reason); }
@@ -295,14 +317,14 @@ export default function AdminPage() {
 
   async function retryDetail() {
     if (!selectedJobId || busy) return; const requestId = jobRequestSequence.current; setBusy(true); clearFeedback();
-    try { const result = await adminApi.job(selectedJobId); if (requestId !== jobRequestSequence.current) return; setJob(result); setDetailError(false); }
+    try { const result = await track("求人詳細を取得中…", () => adminApi.job(selectedJobId)); if (requestId !== jobRequestSequence.current) return; setJob(result); setDetailError(false); }
     catch (e) { if (requestId === jobRequestSequence.current) { setDetailError(true); showError(e); } }
     finally { if (requestId === jobRequestSequence.current) setBusy(false); }
   }
 
   async function retryCandidates() {
     if (!selectedJobId || busy) return; const requestId = jobRequestSequence.current; setBusy(true); clearFeedback();
-    try { const result = await adminApi.candidates(selectedJobId); if (requestId !== jobRequestSequence.current) return; setCandidates(result); setCandidatesError(false); }
+    try { const result = await track("候補会員とLINE連携状態を確認中…", () => adminApi.candidates(selectedJobId)); if (requestId !== jobRequestSequence.current) return; setCandidates(result); setCandidatesError(false); }
     catch (e) { if (requestId === jobRequestSequence.current) { setCandidatesError(true); showError(e); } }
     finally { if (requestId === jobRequestSequence.current) setBusy(false); }
   }
@@ -394,13 +416,15 @@ export default function AdminPage() {
   async function beginOperation() {
     if (!job || selected.size === 0 || busy || (lineSendMode?.max_recipients != null && selected.size > lineSendMode.max_recipients)) return;
     setBusy(true); clearFeedback();
+    let savedOperation = operation;
     try {
       const current = await createOrSaveTargets({
         operation, jobId: job.job_id,
         createBody: { job_id: job.job_id, notification_type: notificationType, ...message },
-        selectedMemberIds: [...selected], create: adminApi.createOperation,
-        saveTargets: adminApi.updateTargets, reload: adminApi.operation,
+        selectedMemberIds: [...selected], create: (body) => track("通知を作成中…", () => adminApi.createOperation(body)),
+        saveTargets: (id, ids) => track("対象会員を保存中…", () => adminApi.updateTargets(id, ids)), reload: (id) => track("通知の状態を取得中…", () => adminApi.operation(id)),
         onCreated: (created) => {
+          savedOperation = created;
           setOperation(created); setNotificationType(created.notification_type); setTargetsPending(true);
           sessionStorage.setItem(STORAGE_KEY, created.operation_id);
           sessionStorage.setItem(SELECTED_KEY, JSON.stringify([...selected]));
@@ -411,7 +435,7 @@ export default function AdminPage() {
       setSuccess("対象者を保存しました。"); setStep("edit");
     } catch (e) {
       showError(e);
-      if (operation || sessionStorage.getItem(STORAGE_KEY)) {
+      if (savedOperation) {
         setTargetsPending(true);
         setSuccess("通知操作は作成済みです。対象者の保存を再試行してください。");
       }
@@ -422,7 +446,7 @@ export default function AdminPage() {
   async function saveMessage() {
     if (!operation || !workflowState.canSaveDraft || workflowLock.current) return;
     workflowLock.current = true; setWorkflowAction("saving"); setBusy(true); clearFeedback();
-    try { const current = await adminApi.updateOperation(operation.operation_id, message); setOperation(current); setValidation(null); recordSessionEvent(current.operation_id, "下書き保存", "保存済み", "現在の通知本文を保存しました。"); setSuccess("通知文を保存しました。"); }
+    try { const current = await track("通知文を保存中…", () => adminApi.updateOperation(operation.operation_id, message)); setOperation(current); setValidation(null); recordSessionEvent(current.operation_id, "下書き保存", "保存済み", "現在の通知本文を保存しました。"); setSuccess("通知文を保存しました。"); }
     catch (e) { showError(e); }
     finally { workflowLock.current = false; setWorkflowAction("idle"); setBusy(false); }
   }
@@ -433,8 +457,8 @@ export default function AdminPage() {
     workflowLock.current = true; setWorkflowAction("validating"); setBusy(true); clearFeedback();
     setValidation(null); setValidationSnapshot(null); setValidationInvalidation(null);
     try {
-      const result = await saveThenValidate({ operationId: operation.operation_id, message, save: adminApi.updateOperation, validate: adminApi.validate });
-      const currentOperation = await adminApi.operation(operation.operation_id);
+      const result = await saveThenValidate({ operationId: operation.operation_id, message, save: (id, body) => track("通知文を保存中…", () => adminApi.updateOperation(id, body)), validate: (id) => track("送信前の検証中…", () => adminApi.validate(id)) });
+      const currentOperation = await track("通知の状態を取得中…", () => adminApi.operation(operation.operation_id));
       setOperation(currentOperation); setValidation(result.validation);
       if (isValidationSnapshotCurrent(startedSnapshot, validationInputRef.current)) {
         setMessage(result.operation.message); setValidationSnapshot(startedSnapshot); setValidationInvalidation(null); setStep("confirm");
@@ -443,7 +467,7 @@ export default function AdminPage() {
         recordSessionEvent(operation.operation_id, "事前検証", "検証失効", "検証中に内容が変更されたため、結果を送信許可として使用しません。");
       }
     }
-    catch (e) { setValidation(null); setValidationSnapshot(null); setValidationInvalidation(null); recordSessionEvent(operation.operation_id, "事前検証", "完了せず", "事前検証を完了できませんでした。"); showError(e); setOperation(await adminApi.operation(operation.operation_id).catch(() => operation)); }
+    catch (e) { setValidation(null); setValidationSnapshot(null); setValidationInvalidation(null); recordSessionEvent(operation.operation_id, "事前検証", "完了せず", "事前検証を完了できませんでした。"); showError(e); setOperation(await track("通知の状態を取得中…", () => adminApi.operation(operation.operation_id)).catch(() => operation)); }
     finally { workflowLock.current = false; setWorkflowAction("idle"); setBusy(false); }
   }
 
@@ -453,7 +477,7 @@ export default function AdminPage() {
     setQueueFailure(false); setDeliveriesError("");
     try {
       const result = await sendThenLoadDeliveries({
-        operationId: operation.operation_id, send: adminApi.send, loadDeliveries: adminApi.deliveries,
+        operationId: operation.operation_id, send: (id) => track("通知を送信中…", () => adminApi.send(id)), loadDeliveries: (id) => track("送信結果を取得中…", () => adminApi.deliveries(id)),
         onSent: (sent) => { setOperation(sent); setStep("result"); setDeliveriesLoading(true); },
       });
       if (validationInputRef.current.operationId === operation.operation_id) { setDeliveries(result.deliveries); setDeliveriesOperationId(result.deliveries ? operation.operation_id : null); }
@@ -463,13 +487,13 @@ export default function AdminPage() {
         setQueueFailure(true); setError("送信処理は開始されませんでした。現在の状態を確認してください。自動再送は行いません。");
       } else showError(e);
       setValidationSnapshot(null); setValidationInvalidation("送信処理後の状態を再確認し、必要に応じて再検証してください。");
-      setOperation(await adminApi.operation(operation.operation_id).catch(() => operation));
+      setOperation(await track("通知の状態を取得中…", () => adminApi.operation(operation.operation_id)).catch(() => operation));
     }
     finally { workflowLock.current = false; setWorkflowAction("idle"); setDeliveriesLoading(false); setBusy(false); }
   }
 
   async function loadDeliveriesOnly() {
-    await deliveryRefresh.current?.refresh();
+    await track("送信結果を取得中…", async () => deliveryRefresh.current?.refresh());
   }
 
   function recordSessionEvent(operationId: string, name: string, status: string, description: string) {
@@ -477,8 +501,8 @@ export default function AdminPage() {
     setSessionHistory((current) => [event, ...current].slice(0, 10));
   }
 
-  const overlayActive = loading || modeLoading || restoringOperation || busy;
-  return <><LoadingOverlay active={overlayActive} /><AdminShell mode={lineSendMode}><main className="admin-main">
+  const overlayActive = loading || modeLoading || restoringOperation || busy || loadingStatus !== null;
+  return <><JobsNavigationGuard busy={overlayActive || workflowAction === "sending" || operation?.status === "sending"} dirty={Boolean(job && (!operation || !messagesEqual(message, operation.message) || !memberSelectionsEqual(selected, operation.selected_member_ids ?? []) || centerDisplayNameDraft.trim() !== centerDisplayName || noticeDraft.trim() !== appliedNotice))} /><LoadingOverlay active={overlayActive} status={loadingStatus ?? (restoringOperation ? "保存済み通知を復元中…" : "通知作成を準備中…")} /><AdminShell mode={lineSendMode}><main className="admin-main">
     <div className="sr-status" aria-live="polite">{loading || busy ? "処理中です…" : ""}</div>
     {error && <div className="admin-error" role="alert">{error}</div>}
     {success && <div className="admin-success" role="status">{success}</div>}
@@ -491,6 +515,7 @@ export default function AdminPage() {
     </AdminPanel>
     <AdminPanel number={2} title="対象候補会員" badge={job ? `${job.title}・${candidates.length}人` : undefined} actions={job ? <CandidateFilterMenu value={candidateFilter} onChange={setCandidateFilter} /> : undefined}>
       {!selectedJobId ? <p className="admin-panel-empty">求人を選択すると、通知候補会員を読み込みます。</p> : !job ? <div className={detailError ? "admin-error" : "admin-info"} role={detailError ? "alert" : "status"}>{detailError ? <><p>選択求人の詳細を取得できませんでした。</p><button className="admin-button secondary" disabled={busy} onClick={() => void retryDetail()}>求人詳細を再読み込み</button></> : "選択求人を読み込んでいます。"}</div> : <CandidateSelectionPanel job={job} candidates={candidates} selected={selected} notificationType={operation?.notification_type ?? notificationType} notificationTypeLocked={operation !== null} setNotificationType={changeNotificationType} toggle={toggle} begin={beginOperation} busy={busy} error={candidatesError} retry={retryCandidates} targetsPending={targetsPending} maxRecipients={lineSendMode?.max_recipients ?? null} editable={step === "detail" && !workflowState.terminal} filter={candidateFilter} setFilter={setCandidateFilter} />}
+      {job && operation && <div className="candidate-edit-actions"><button className="admin-button secondary" disabled={busy || workflowAction === "sending" || workflowState.terminal || !["draft", "ready"].includes(operation.status) || Boolean(operation.send_requested_at)} onClick={() => { setValidationSnapshot(null); setValidationInvalidation("対象会員の編集後は再検証してください。"); setStep("detail"); }}>対象会員編集</button></div>}
     </AdminPanel>
     </div>
     <AdminPanel number={3} title="通知文編集" badge={job?.title} status={workflowState.state === "stale" ? "再検証が必要" : step === "edit" ? "現在の操作" : operation ? "下書きあり" : "未準備"}>
@@ -510,7 +535,7 @@ export default function AdminPage() {
     </div>
     </div>
     {pendingTemplate && <Modal title="通知テンプレートを変更しますか？" onClose={() => setPendingTemplate(null)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setPendingTemplate(null)}>キャンセル</button><button className="admin-button" type="button" onClick={() => commitTemplate(pendingTemplate)}>テンプレートを適用</button></>}><p>現在の通知本文は、選択したテンプレートの内容で置き換えられます。</p></Modal>}
-    {pendingJobId && <Modal title="求人を変更しますか？" onClose={() => setPendingJobId(null)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setPendingJobId(null)}>キャンセル</button><button className="admin-button danger" type="button" onClick={() => void switchToJob(pendingJobId)}>求人を変更する</button></>}><p>求人を変更すると、現在の通知本文、対象会員、検証結果は破棄されます。保存済みの旧通知履歴は削除されません。</p></Modal>}
+    {pendingJobId && <Modal placement="center" title="求人を変更しますか？" onClose={() => setPendingJobId(null)} footer={<><button className="admin-button secondary" type="button" data-modal-initial-focus onClick={() => setPendingJobId(null)}>キャンセル</button><button className="admin-button danger" type="button" onClick={() => void switchToJob(pendingJobId)}>求人を変更する</button></>}><p>求人を変更すると、現在の通知本文、対象会員、検証結果は破棄されます。保存済みの旧通知履歴は削除されません。</p></Modal>}
   </main></AdminShell></>;
 }
 

@@ -205,7 +205,7 @@ async def test_summary_does_not_serialize_additional_provider_identity(context):
         line_subject: str = "private-line-identity"
 
     async def broad_summary(**kwargs):
-        return BroadSummary(kwargs["external_member_id"], "Display")
+        return BroadSummary(kwargs["external_member_id"], "Display", member_number="0007", mobile_phone_last4="1234")
 
     context[1].get_member_summary = broad_summary
     response = await post(context, "members:summary", {"service_id": "service-a", "external_member_id": "stable-member"})

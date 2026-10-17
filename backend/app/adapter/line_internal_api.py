@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 from datetime import datetime
 from uuid import UUID
 
+
 import httpx
 from pydantic import SecretStr, ValidationError
 
@@ -127,6 +128,12 @@ class HttpLineInternalApiClient:
         )
 
     async def _request(self, method, path, model, *, expected_status, json=None):
+        request_options = {}
+        if method == "POST" and path == "/internal/v1/line-linkages:batch-get":
+            # Copy per request: preserve connect/write/pool and the shared client.
+            timeout = httpx.Timeout(self._client.timeout)
+            timeout.read = 180.0
+            request_options["timeout"] = timeout
         try:
             response = await self._client.request(
                 method,
@@ -136,6 +143,7 @@ class HttpLineInternalApiClient:
                     "Accept": "application/json",
                 },
                 json=json,
+                **request_options,
             )
         except (httpx.TimeoutException, httpx.NetworkError) as error:
             raise LineInternalApiRetryableError(

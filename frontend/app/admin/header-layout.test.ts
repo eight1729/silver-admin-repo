@@ -26,6 +26,7 @@ const shell = load("./AdminShell.tsx", {
   "./notification-templates": { DEFAULT_CENTER_DISPLAY_NAME: "検証用センター" },
   "./send-capability": { modePresentation: () => ({ tone: "blocked", label: "送信不可", detail: "確認してください" }) },
   "./AdminHeaderActions": actions, "./AdminHomeButton": home,
+  "./sidebar-focus": { attachSidebarFocus: () => () => {} },
 });
 
 function boundary(state: string, required = true, denied: number | null = null) {
@@ -80,23 +81,16 @@ test("auth-disabled mode and its 401/403 screens preserve existing Logout absenc
   for (const status of [401, 403]) assert.doesNotMatch(boundary("loading", false, status).html, /admin-app-header|ログアウト|protected page/);
 });
 
-for (const [busy, action, expected] of [[false, "idle", "jobs"], [true, "idle", "edit"], [false, "sending", "edit"]] as const) {
-  test(`visible Home dispatch preserves page handler: busy=${busy}, action=${action}`, () => {
-    const bus = new EventTarget();
-    let step = "edit";
-    let events = 0;
-    const body = source("./page.tsx").match(/const returnToJobs = useCallback\(\(\) => \{([\s\S]*?)\}, \[busy, workflowAction\]\);/)?.[1];
-    assert.ok(body);
-    const handler = runInNewContext(`() => {${body}}`, { busy, workflowAction: action, setStep: (value: string) => { step = value; } });
-    bus.addEventListener("demo-admin:show-jobs", () => { events++; handler(); });
-    const loaded = load("./AdminHomeButton.tsx", {}, { window: bus, Event });
-    assert.ok("AdminHomeButton" in loaded && typeof loaded.AdminHomeButton === "function");
-    loaded.AdminHomeButton().props.onClick();
-    assert.equal(events, 1); assert.equal(step, expected);
-    assert.match(source("./page.tsx"), /window.addEventListener\(ADMIN_HOME_EVENT, handler\)/);
-    assert.match(source("./page.tsx"), /window.removeEventListener\(ADMIN_HOME_EVENT, handler\)/);
-  });
-}
+test("visible Home dispatches exactly once to the shared navigation guard", () => {
+  const bus = new EventTarget(); let events = 0;
+  bus.addEventListener("demo-admin:show-jobs", () => { events++; });
+  const loaded = load("./AdminHomeButton.tsx", {}, { window: bus, Event });
+  assert.ok("AdminHomeButton" in loaded && typeof loaded.AdminHomeButton === "function");
+  loaded.AdminHomeButton().props.onClick();
+  assert.equal(events, 1);
+  assert.match(source("./JobsNavigationGuard.tsx"), /window.addEventListener\(ADMIN_HOME_EVENT, handler\)/);
+  assert.match(source("./JobsNavigationGuard.tsx"), /window.removeEventListener\(ADMIN_HOME_EVENT, handler\)/);
+});
 
 test("legacy hidden controls and dedicated CSS are retired; Home stays scoped to its handler route", () => {
   assert.doesNotMatch(source("./layout.tsx"), /admin-legacy-header|AdminHomeButton|aria-hidden/);

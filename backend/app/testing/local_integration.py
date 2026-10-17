@@ -89,9 +89,15 @@ class ScopedFakeExternalBusinessGateway:
         )
 
     async def search_jobs(self, *, external_organization_id, query):
-        return await self._gateway(external_organization_id).search_jobs(
+        result = await self._gateway(external_organization_id).search_jobs(
             external_organization_id=external_organization_id,
             query=query,
+        )
+        # This local fixture stores the complete collection; honor caller paging.
+        start = (query.page - 1) * query.page_size
+        return PagedExternalJobs(
+            result.items[start:start + query.page_size], query.page, query.page_size,
+            len(result.items), start + query.page_size < len(result.items),
         )
 
     async def list_candidate_members(self, *, external_organization_id, external_job_id):

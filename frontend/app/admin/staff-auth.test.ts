@@ -210,7 +210,7 @@ test("production UI mounts login before protected children; forbidden and logout
   const layout = readFileSync(resolve(here, "layout.tsx"), "utf8");
   assert.match(layout, /<AdminAuthBoundary>/);
   const login = readFileSync(resolve(here, "StaffLogin.tsx"), "utf8");
-  assert.match(login, /if \(accepted\) window.location.replace\("\/"\)/);
+  assert.match(login, /if \(accepted\) window.location.replace\("\/admin\/dashboard"\)/);
 });
 
 
@@ -218,5 +218,5 @@ test("target payload retains UUID selection instead of display member number", a
   const b = browser();
   const candidate = { member_id: "144813ad-bed4-4330-b592-0e6aebcfd1bc", member_number: "0001" };
   await b.api.updateTargets("operation", [candidate.member_id, candidate.member_id]);
-  assert.deepEqual(JSON.parse(b.body!), { selected_member_ids: [candidate.member_id] });
+  assert.deepEqual(JSON.parse(b.body!), { selected_member_ids: [candidate.member_id], reinclude_member_ids: [] });
 });

@@ -1,13 +1,15 @@
 from datetime import datetime
 from uuid import UUID
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from app.domain.enums.enums import DeliveryStatus, JobStatus, OperationStatus
 from app.domain.enums.notification_type import NotificationType
 
 
 class AdminJobSummaryResponse(BaseModel):
+    created_at: AwareDatetime | None = None
     job_id: str
     title: str
     location: str | None
@@ -20,6 +22,7 @@ class AdminJobSummaryResponse(BaseModel):
 
 
 class AdminJobDetailResponse(BaseModel):
+    created_at: AwareDatetime | None = None
     job_id: str
     title: str
     description: str
@@ -33,6 +36,7 @@ class AdminJobDetailResponse(BaseModel):
 
 
 class AdminCandidateResponse(BaseModel):
+    recommendation_level: int | None = Field(default=None, ge=1, le=5)
     member_id: str
     member_number: str | None = None
     display_name: str
@@ -44,6 +48,7 @@ class AdminCandidateResponse(BaseModel):
 
 
 class AdminOperationCreateRequest(BaseModel):
+    automatic_selection: bool = False
     model_config = ConfigDict(extra="forbid")
     job_id: str = Field(min_length=1)
     notification_type: NotificationType
@@ -60,6 +65,7 @@ class AdminOperationUpdateRequest(BaseModel):
 
 
 class AdminTargetsUpdateRequest(BaseModel):
+    reinclude_member_ids: tuple[str, ...] = ()
     model_config = ConfigDict(extra="forbid")
     selected_member_ids: tuple[str, ...]
 
@@ -71,6 +77,8 @@ class AdminMessageResponse(BaseModel):
 
 
 class AdminOperationResponse(BaseModel):
+    automatic_selection: bool = False
+    selected_member_ids: tuple[str, ...] = ()
     operation_id: UUID
     job_id: str
     job_version: str | None
@@ -86,7 +94,45 @@ class AdminOperationResponse(BaseModel):
     updated_at: datetime
 
 
+class AdminValidationTargetResponse(BaseModel):
+    member_id: str
+    disposition: Literal["send", "skip", "block"]
+    reason: str | None
+
+
+class AdminConfirmationTargetResponse(AdminValidationTargetResponse):
+    member_number: str | None
+    display_name: str | None
+    mobile_phone_last4: str | None = Field(default=None, pattern=r"^[0-9]{4}$")
+
+
+class AdminConfirmationResponse(BaseModel):
+    operation_id: UUID
+    initial_count: int
+    selected_count: int
+    sendable_count: int
+    excluded_count: int
+    message: AdminMessageResponse
+    targets: tuple[AdminConfirmationTargetResponse, ...]
+    confirmation_token: str | None
+    requires_revalidation: bool
+    selected_recipient_limit: int | None
+    can_send: bool
+
+
+class AdminAutomaticSelectionResponse(BaseModel):
+    selected_member_ids: tuple[str, ...]
+    reason: str | None
+
+
+class AdminSendRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirmation_token: str | None = Field(default=None, min_length=64, max_length=64)
+
+
 class AdminValidationResponse(BaseModel):
+    target_results: tuple[AdminValidationTargetResponse, ...] = ()
+    requires_staff_reconfirmation: bool = False
     operation_id: UUID
     status: OperationStatus
     can_proceed: bool

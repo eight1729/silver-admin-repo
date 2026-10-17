@@ -30,6 +30,7 @@ class AdminNotificationRepository(Protocol):
         operation_id: UUID,
         operation: NotificationOperationRecord,
         event: NotificationAuditEvent,
+        *, expected_operation: NotificationOperationRecord | None = None,
     ) -> NotificationOperationRecord: ...
 
     async def update_operation(
@@ -37,6 +38,7 @@ class AdminNotificationRepository(Protocol):
         service_id: str,
         operation_id: UUID,
         operation: NotificationOperationRecord,
+        *, expected_operation: NotificationOperationRecord | None = None,
     ) -> NotificationOperationRecord: ...
 
     async def list_operations(
@@ -50,6 +52,7 @@ class AdminNotificationRepository(Protocol):
         targets: Iterable[NotificationTargetRecord],
         operation: NotificationOperationRecord,
         event: NotificationAuditEvent,
+        *, expected_operation: NotificationOperationRecord | None = None,
     ) -> tuple[NotificationOperationRecord, tuple[NotificationTargetRecord, ...]]: ...
 
     async def get_targets(

@@ -1,6 +1,9 @@
 """Admin-owned wire contract; business projections remain domain-owned."""
 
 from typing import Annotated, Literal
+from dataclasses import dataclass
+from datetime import datetime
+from app.domain.enums.enums import JobStatus
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -57,3 +60,43 @@ class InternalErrorDetail(BaseModel):
 
 class InternalErrorResponse(BaseModel):
     detail: InternalErrorDetail
+
+
+# Explicit v1 allowlist: Admin-only display attributes must never widen the S2S wire contract.
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalMemberSummary:
+    external_member_id: str
+    display_label: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalJobSummary:
+    external_job_id: str
+    title: str
+    summary: str | None
+    work_location_summary: str | None
+    work_schedule_summary: str | None
+    application_deadline: datetime | None
+    status: JobStatus
+    version: str
+    updated_at: datetime | None
+    work_days: str | None = None
+    work_time: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalJobDetail:
+    external_job_id: str
+    title: str
+    description: str
+    work_location: str | None
+    work_schedule_text: str | None
+    application_deadline: datetime | None
+    required_conditions: tuple[str, ...]
+    status: JobStatus
+    version: str
+    updated_at: datetime | None
+    staff_notes: str | None
+    job_url: str | None = None
