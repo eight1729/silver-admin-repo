@@ -46,6 +46,10 @@ class LineNotificationResultNotFoundError(LineInternalApiPermanentError):
     """Result GET returned 404, not an accepted command still awaiting delivery."""
 
 
+class LineInternalApiScopeForbiddenError(LineInternalApiPermanentError):
+    """The authenticated caller cannot use the requested or saved scope."""
+
+
 def validate_notification_result_identity(result, expected) -> None:
     """Validate immutable identity and the required sent-result event time."""
     if any(getattr(result, field, None) != getattr(expected, field) for field in (
@@ -154,6 +158,15 @@ class HttpLineInternalApiClient:
             raise LineNotificationResultNotFoundError(
                 "LINE notification result was not found (404)", reason_category="not_found", http_status=404,
             )
+        if response.status_code == 403:
+            try:
+                scope_denied = response.json() == {"detail": {"error": "scope_forbidden"}}
+            except ValueError:
+                scope_denied = False
+            if scope_denied:
+                raise LineInternalApiScopeForbiddenError(
+                    "LINE internal API scope is forbidden", reason_category="http", http_status=403,
+                )
         if response.status_code == 409 or 400 <= response.status_code < 500:
             raise LineInternalApiPermanentError(
                 f"LINE internal API rejected the request ({response.status_code})", reason_category="http", http_status=response.status_code,

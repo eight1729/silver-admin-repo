@@ -361,9 +361,12 @@ class AdminApplicationService:
 
     async def resolve_notification_link(self, service_id: str, job_id: str) -> str:
         if self._line_internal_client is not None:
-            result = await self._line_internal_client.resolve_deep_link(
-                LiffDeepLinkRequest(scope=self._line_scope(service_id), job_id=job_id)
-            )
+            try:
+                result = await self._line_internal_client.resolve_deep_link(
+                    LiffDeepLinkRequest(scope=self._line_scope(service_id), job_id=job_id)
+                )
+            except LineInternalApiClientError:
+                raise AdminDependencyUnavailableError("LINE deep-link service is unavailable") from None
             return str(result.canonical_deep_link)
         raise AdminDependencyUnavailableError("LINE deep-link service is unavailable")
 

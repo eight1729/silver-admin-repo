@@ -296,6 +296,9 @@ class HttpExternalBusinessGateway:
         return ExternalMemberSummary(
             external_member_id=returned,
             display_label=_optional_text(body.get("display_label")),
+            # migak confirms member_number is exactly external_member_id.
+            # Keep this provider mapping after the response identity check.
+            member_number=returned,
             mobile_phone_last4=_mobile_last4(body.get("mobile_last4")),
         )
 

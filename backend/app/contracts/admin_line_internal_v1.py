@@ -13,7 +13,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 CONTRACT_ARTIFACT = "line-internal-api-v1.openapi.json"
-CONTRACT_VERSION = "1.0.0"
+CONTRACT_VERSION = "1.1.1"
 
 
 class ContractModel(BaseModel):

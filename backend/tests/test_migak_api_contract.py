@@ -1,5 +1,6 @@
 """Offline migak contract coverage through HTTP and the existing notification flow."""
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import httpx
@@ -87,6 +88,56 @@ async def test_summary_mobile_does_not_fall_back_to_home(mobile, expected):
     assert row.mobile_phone_last4 == expected and row.display_label == "Test"
 
 
+@pytest.mark.parametrize("number", ["1234", "123456", "0001", "000001", "9" * 5000],
+                         ids=["four-digits", "six-digits", "leading-zero-four", "leading-zero-six", "huge"])
+async def test_summary_member_number_preserves_confirmed_response_id(number):
+    provider, _ = gateway(json_handler(dict(external_member_id=number, display_label="Test")))
+    row = await provider.get_member_summary(external_organization_id=ORG, external_member_id=number)
+    assert row.member_number == number
+
+
+@pytest.mark.parametrize("number,outside_candidates", [
+    ("1234", False), ("123456", False), ("0001", False), ("000001", False),
+    ("9" * 100, False), ("000001", True),
+])
+async def test_http_summary_confirmation_number_does_not_change_send_decision(db, number, outside_candidates):
+    from app.schemas.admin import AdminConfirmationResponse
+
+    w = await world(db, 1)
+    w.members[:] = [number]
+    w.linked.clear()
+    w.linked[number] = True
+    w.external.candidate_members_result = [replace(w.external.candidate_members_result[0],
+        external_member_id=number, member_number=number)]
+    op = await prepare(w)
+    if outside_candidates:
+        w.external.candidate_members_result = []
+        w.blocked.add(number)
+    before = await validate(w, op)
+    saved = await w.app.get_operation("svc", op)
+    provider, calls = gateway(json_handler(dict(external_member_id=number,
+        display_label="Test", mobile_last4="0123", phone_last4="9999")))
+    w.app._external = provider
+    view = await w.app.confirmation("svc", op)
+    response = AdminConfirmationResponse(**view).model_dump(mode="json")
+    assert response["targets"][0]["member_number"] == number
+    assert response["targets"][0]["mobile_phone_last4"] == "0123"
+    assert len(calls) == 1 and calls[0].url.path.endswith("members:summary")
+    assert json.loads(calls[0].content) == {"external_member_id": number}
+    for field in ("initial_count", "selected_count", "sendable_count", "excluded_count",
+                  "can_send", "confirmation_token", "requires_revalidation"):
+        assert view[field] == before[field]
+    assert view["targets"][0]["disposition"] == before["targets"][0]["disposition"]
+    assert view["targets"][0]["reason"] == before["targets"][0]["reason"]
+    assert await w.app.get_operation("svc", op) == saved
+    if outside_candidates:
+        assert view["excluded_count"] == 1 and view["sendable_count"] == 0
+        assert not view["can_send"] and view["confirmation_token"] is None
+    else:
+        assert view["can_send"] and view["confirmation_token"] is not None
+    assert not await w.repo.get_outbox_records("svc", op)
+
+
 async def test_missing_created_at_and_mobile_remain_unknown():
     provider, _ = gateway(json_handler(JOB_ITEM))
     detail = await provider.get_job_detail(external_organization_id=ORG, external_job_id="job-1")
@@ -133,6 +184,9 @@ async def test_http_full_set_selection_validation_and_send(db):
     saved = await w.app.get_operation("svc", op)
     assert {t.member_id for t in saved.targets if t.selected} == {f"m-{i}" for i in range(901, 1001)}
     view = await validate(w, op)
+    # migak's response identity is also its display member number.
+    assert all(row["member_number"] == row["member_id"] and row["mobile_phone_last4"] == "0123"
+               for row in view["targets"])
     summary_calls = [r for r in calls if r.url.path.endswith("members:summary")]
     assert len(summary_calls) == 100
     assert {json.loads(r.content)["external_member_id"] for r in summary_calls} == {f"m-{i}" for i in range(901, 1001)}
@@ -168,6 +222,12 @@ async def test_validation_limit_after_manual_edit(db, count, automatic):
             assert not any(r.url.path.endswith("validate-targets") for r in calls)
         assert not await w.repo.get_outbox_records("svc", op)
         assert not await w.repo.get_deliveries("svc", op)
+        await w.app.replace_targets(service_id="svc", operation_id=op, staff_id="staff",
+                                    selected_member_ids=tuple(w.members)[:500])
+        await w.app.validate(service_id="svc", operation_id=op, staff_id="staff", request_id="reduced")
+        validation_calls = [r for r in calls if r.url.path.endswith("validate-targets")]
+        assert len(validation_calls) == 1
+        assert len(json.loads(validation_calls[0].content)["external_member_ids"]) == 500
 
 
 async def test_limit_guard_precedes_token_and_http_request():
