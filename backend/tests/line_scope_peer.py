@@ -28,6 +28,13 @@ async def main():
             envelope = json.loads(line)
             scopes = envelope["scopes"]
             boundary = runtime(db, scopes)
+            for seed in envelope.get("preferences", []):
+                linkage = await boundary.recipients.register_linkage(
+                    organization_id=seed["org"], service_id=seed["service"],
+                    external_member_id=seed["member"], line_subject=f"fictional-{seed['member']}")
+                if seed["enabled"] is not None:
+                    await boundary.recipients.update_preferences(linkage,
+                        job_notifications_enabled=seed["enabled"], center_notifications_enabled=False)
             boundary = replace(boundary, deep_links=SettingsCanonicalDeepLinkResolver({
                 org: {service: "https://liff.line.me/offline"}
                 for service, org in scopes.items()

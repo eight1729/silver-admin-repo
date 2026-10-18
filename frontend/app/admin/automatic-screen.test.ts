@@ -8,6 +8,7 @@ import React from "react";
 import * as ordering from "./automatic-workflow.ts";
 import * as capability from "./send-capability.ts";
 import * as uiState from "./notification-ui-state.ts";
+import * as notificationReasons from "./notification-reasons.ts";
 import * as templates from "./notification-templates.ts";
 
 const require = createRequire(import.meta.url);
@@ -53,6 +54,7 @@ function harness({ failTargets = false, restored = false, zero = false, stale = 
     deliveries: async () => { if (failResults) throw Error("results failed"); return { items: [{ member_id: "a", status: completed ? "sent" : "pending" }], summary: {} }; },
   };
   const mocks: Record<string, any> = {
+    "./notification-reasons": notificationReasons,
     react: { ...React,
       useState: (initial: any) => { const i = stateIndex++; if (!(i in states)) states[i] = typeof initial === "function" ? initial() : initial;
         return [states[i], (value: any) => { states[i] = typeof value === "function" ? value(states[i]) : value; }]; },

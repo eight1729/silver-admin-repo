@@ -457,3 +457,13 @@ local標準はFrontend 3001、Backend 8082、Python 3.12 / Windows SelectorEvent
 localはselected 10人まで。11 selected / 10 sendableもBackendがDelivery/Outbox生成前に拒否する。productionには固定上限を適用しない。LINE ready/capability上限は両環境で維持する。staging_live、旧staging-readiness、送信Internal API contractは変更しない。
 
 Manual Gate: 人間による実env、Google Origin、Staff identity/permission、開発DB・未完了Operation確認、Admin/LINE/Frontend起動、Google Login、1人/複数人/10人/11人境界、sender icon表示、production DB/LINE URLと双方向credentialの環境対応、Cloud env/Secret設定、deployment。runnerは未完了送信を再開するため、起動前に接続DBと所有scopeを確認する。
+# 通知受信設定の事前検証を含む配備確認
+
+- LINE Internal v1.2.0の`line-linkages:batch-get`と同版consumer/artifactを使用する。既存500件分割・不完全応答拒否を維持する。
+- 手動・自動とも保存済み対象について検証時と送信直前に就業通知設定を再取得する。拒否・未回答は除外、取得不能は全体を検証不能とする。候補抽出、100人の自動初期選択、業務validate-targetsの上限、local/capability制限は変更しない。
+- Admin Public validate応答に`confirmation_token`を追加。手動Frontendも既存send bodyへ渡す。旧Frontendのtokenなし手動sendは409となるためBackendとFrontendを揃える。新規DB migrationはない。
+- 送信可能・不可が混在する場合、人数・会員番号・理由を表示し、「除外理由を確認して送信可能なN名に送信」から明示的に送信する。tokenは検証snapshot・対象集合・本文に結び付き、送信時の再検証で集合が変われば再確認を要求する。
+- LINE連携／受信設定の正本はLINE。Adminは設定値を複製せず、既存検証・結果の理由を保持する。LINE送信直前の最新状態が最終判断となる。センター情報設定は対象外。
+- 処理終了は全員への送信成功を意味しない。配信結果の実送信成功件数と、拒否・未回答・失敗・不明の内訳を確認する。既存終端結果・Outbox reconcile・自動再送しない契約は維持する。
+- Manual Gate: 既存受信設定4列の適用、runtime roleのSELECT権限、Admin/LINE同環境のscope・URL・Bearer、両Backend/Frontendの版を確認する。通知受付・runner/recoveryを停止した配備計画で契約を揃える。旧Adminは新しい応答フィールドを拒否し、新Adminは旧LINEの欠損フィールドをunknownとして安全停止する。
+- 開発画面で手動／自動の混在・全員拒否・設定変更後の再検証・F1/F2を確認してから本番反映を判断する。コードテスト成功は実設定適用・本番承認ではない。実DB・実LINE・デプロイは今回未実施。

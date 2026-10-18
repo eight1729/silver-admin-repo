@@ -1,3 +1,4 @@
+import { notificationReasonLabel as safeReasonLabel } from "./notification-reasons";
 import { JobDateFilter } from "./JobDateFilter";
 import { filterRegisteredJobs, formatJobRegistration } from "./job-registration";
 import { pageWindow } from "./page-window";
@@ -198,7 +199,7 @@ export function SendConfirmationPanel({ operation, validation, candidates, selec
   return <div className="compact-send-confirmation">
     <SendOverview operation={operation} validation={validation} candidates={candidates} selected={selected} validationCurrent={validationCurrent} action={action} lineSendMode={lineSendMode} queueFailure={queueFailure} />
     <div className="confirmation-edit-links"><button type="button" disabled={busy} onClick={targets}>対象を変更</button></div>
-    <SendActionButtons operation={operation} save={save} validate={revalidate} send={send} canSaveDraft={canSaveDraft} canValidate={canValidate} canSend={canSend} action={action} busy={busy} />
+    <SendActionButtons operation={operation} save={save} validate={revalidate} send={send} exclusionCount={validation.selected_count - validation.sendable_count} sendableCount={validation.sendable_count} canSaveDraft={canSaveDraft} canValidate={canValidate} canSend={canSend} action={action} busy={busy} />
   </div>;
 }
 
@@ -211,7 +212,9 @@ export function SendPreparationState({ operation, validation, candidates, select
 
 function SendOverview({ operation, validation, candidates, selected, validationCurrent, action, lineSendMode, queueFailure }: { operation: AdminOperation | null; validation: AdminValidation | null; candidates: AdminCandidate[]; selected: Set<string>; validationCurrent: boolean; action: WorkflowAction; lineSendMode: AdminLineSendMode | null; queueFailure: boolean }) {
   const selectedCount = operation?.selected_count ?? selected.size;
-  const unlinkedCount = candidates.filter((candidate) => selected.has(candidate.member_id) && candidate.line_linked === false).length;
+  const unlinkedCount = validationCurrent && validation?.target_results
+    ? validation.target_results.filter(item => item.reason === "line_not_linked").length
+    : candidates.filter((candidate) => selected.has(candidate.member_id) && candidate.line_linked === false).length;
   const validating = action === "validating";
   const hasProblem = !validating && (queueFailure || !operation || selectedCount === 0 || validation !== null && !validationCurrent || validation?.can_proceed === false || validation?.sendable_count === 0 || !canAttemptSend(lineSendMode, validation?.sendable_count ?? 0));
   const validated = !validating && validation !== null && validationCurrent && validation.can_proceed && !hasProblem;
@@ -230,7 +233,7 @@ function SendOverview({ operation, validation, candidates, selected, validationC
   if (queueFailure) problems.add("送信処理は開始されていません。自動再送は行いません。");
   if (validationCurrent && validation) validationProblemReasons(validation.reasons).forEach((reason) => problems.add(safeReasonLabel(reason)));
   const result = validating ? { icon: "…", text: "検証中", className: "is-pending" }
-    : validated ? { icon: "✓", text: "問題ありません", className: "is-success" }
+    : validated ? { icon: "✓", text: validation!.selected_count > validation!.sendable_count ? "除外あり・送信可能者を確認" : "問題ありません", className: "is-success" }
       : hasProblem ? { icon: "×", text: "問題があります", className: "is-problem" }
         : { icon: "○", text: "検証してください", className: "is-pending" };
   return <>
@@ -242,14 +245,21 @@ function SendOverview({ operation, validation, candidates, selected, validationC
       <div><dt>検証結果</dt><dd className={`send-validation-result ${result.className}`} role={validating ? "status" : undefined}><span aria-hidden="true">{result.icon}</span>{result.text}</dd></div>
     </dl>
     {problems.size > 0 && <div className="send-problem-details" role="alert"><strong>問題の詳細</strong><ul>{[...problems].map((problem) => <li key={problem}>{problem}</li>)}</ul></div>}
+    {validationCurrent && validation && <section aria-label="送信不可会員">
+      <p>選択：{validation.selected_count}名 ／ 送信可能：{validation.sendable_count}名 ／ 送信不可：{validation.selected_count - validation.sendable_count}名</p>
+      <ul>{validation.target_results?.filter(item => item.disposition !== "send").map(item => <li key={item.member_id}>
+        会員番号：{candidates.find(candidate => candidate.member_id === item.member_id)?.member_number ?? "未取得"} ／ {safeReasonLabel(item.reason)}
+      </li>)}</ul>
+      {validation.selected_count > validation.sendable_count && <p>送信不可会員を除外し、送信可能会員だけに送信します。</p>}
+    </section>}
   </>;
 }
 
-function SendActionButtons({ operation, save, validate, send, canSaveDraft, canValidate, canSend, action, busy }: { operation: AdminOperation | null; save: () => Promise<void>; validate: () => Promise<void>; send?: () => Promise<void>; canSaveDraft: boolean; canValidate: boolean; canSend: boolean; action: WorkflowAction; busy: boolean }) {
+function SendActionButtons({ operation, save, validate, send, exclusionCount = 0, sendableCount = 0, canSaveDraft, canValidate, canSend, action, busy }: { operation: AdminOperation | null; save: () => Promise<void>; validate: () => Promise<void>; send?: () => Promise<void>; exclusionCount?: number; sendableCount?: number; canSaveDraft: boolean; canValidate: boolean; canSend: boolean; action: WorkflowAction; busy: boolean }) {
   return <div className="compact-send-actions">
     <p className="compact-send-warning"><span aria-hidden="true">!</span> 送信後は取り消せません。現在の送信モードと送信可能な対象者を確認してください。</p>
     <div className="compact-send-secondary"><button className="admin-button secondary" type="button" disabled={!canSaveDraft} onClick={() => void save()}>{action === "saving" ? "保存中…" : "下書き保存"}</button><button className="admin-button secondary" type="button" disabled={!canValidate} onClick={() => void validate()}>{action === "validating" ? "検証中…" : "検証"}</button></div>
-    <button className="admin-button send-primary compact-send-primary" type="button" disabled={!canSend || !send} onClick={() => { if (send) void send(); }}>{action === "sending" ? "送信処理中…" : "送信実行"}<svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17"><path d="m3 3 18 9-18 9 4-9-4-9Zm4.7 8h7.8L6.1 6.3 7.7 11Zm-1.6 6.7 9.4-4.7H7.7l-1.6 4.7Z" fill="currentColor"/></svg></button>
+    <button className="admin-button send-primary compact-send-primary" type="button" disabled={!canSend || !send} onClick={() => { if (send) void send(); }}>{action === "sending" ? "送信処理中…" : exclusionCount > 0 ? `除外理由を確認して送信可能な${sendableCount}名に送信` : "送信実行"}<svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17"><path d="m3 3 18 9-18 9 4-9-4-9Zm4.7 8h7.8L6.1 6.3 7.7 11Zm-1.6 6.7 9.4-4.7H7.7l-1.6 4.7Z" fill="currentColor"/></svg></button>
     {!canSend && !busy && operation && <p className="compact-disabled-reason">送信には最新の検証結果と送信可能な対象者が必要です。</p>}
   </div>;
 }
@@ -258,5 +268,3 @@ export function WorkflowStateNotice({ state, reason }: { state: NotificationUiSt
   const presentation = uiStatePresentation(state);
   return <div className={`workflow-state workflow-state--${state}`} role="status"><strong>{presentation.label}</strong><span>{reason ?? presentation.description}</span></div>;
 }
-
-function safeReasonLabel(reason: string) { return ({ line_not_linked: "LINE未連携", not_selected: "未選択", member_ineligible: "通知対象外", job_closed: "求人募集終了", job_version_changed: "求人情報更新あり", recipient_unavailable: "送信先を利用できません", line_temporary_error: "一時的な送信エラー", line_unknown_result: "送信結果不明" } as Record<string, string>)[reason] ?? "条件を確認してください"; }

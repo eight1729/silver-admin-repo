@@ -61,7 +61,8 @@ async def world(db, count=3, environment="production"):
     calls = []
     async def lookup(request):
         calls.append(tuple(request.external_member_ids))
-        return {"items": [{"external_member_id": m, "line_linked": linked[m]} for m in request.external_member_ids]}
+        return {"items": [{"external_member_id": m, "line_linked": linked[m],
+                           "job_notification_status": "enabled" if linked[m] else "unknown"} for m in request.external_member_ids]}
     application._line_internal_client = SimpleNamespace(batch_get_linkages=lookup)
     application.notification_service._reservation_guard.client = Client(capability())
     dispatched = []

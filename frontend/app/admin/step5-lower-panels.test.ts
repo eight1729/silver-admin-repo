@@ -124,7 +124,8 @@ test("page scopes deliveries to the current operation and lower panels expose no
   assert.match(page, /setDeliveriesOperationId\(null\); setSessionHistory\(\[\]\)/);
   assert.match(page, /<DeliverySummaryPanel operation=\{operation\} deliveries=\{currentDeliveries\}/);
   assert.match(page, /<RecentOperationHistory operation=\{operation\}/);
-  assert.doesNotMatch(panels, /member_id|provider_request_id|reason_code/);
+  assert.doesNotMatch(panels, /member_id|provider_request_id/);
+  assert.match(panels, /notificationReasonLabel\(item.reason_code\)/);
   assert.doesNotMatch(panels, /現在のoperationと、この画面を開いている間に確認できた操作だけを表示します。正式な監査履歴ではありません。/);
   assert.match(panels, /自動再送は行われません/);
 });

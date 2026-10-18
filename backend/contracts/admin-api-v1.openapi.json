@@ -889,6 +889,17 @@
             "title": "Can Proceed",
             "type": "boolean"
           },
+          "confirmation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmation Token"
+          },
           "external_system_blocked": {
             "title": "External System Blocked",
             "type": "boolean"

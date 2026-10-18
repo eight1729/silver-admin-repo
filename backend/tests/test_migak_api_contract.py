@@ -217,7 +217,9 @@ async def test_validation_limit_after_manual_edit(db, count, automatic):
         assert not any(r.url.path.endswith("validate-targets") for r in calls)
         assert (await w.app.get_operation("svc", op)).operation.status.value != "validating"
         if not automatic:
-            with pytest.raises(ExternalTargetLimitExceededError):
+            # Manual sending now requires a validated confirmation token first.
+            from app.application.notification_service import OperationNotSendableError
+            with pytest.raises(OperationNotSendableError, match="confirmation"):
                 await send(w, op, None)
             assert not any(r.url.path.endswith("validate-targets") for r in calls)
         assert not await w.repo.get_outbox_records("svc", op)

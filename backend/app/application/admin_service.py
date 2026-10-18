@@ -251,6 +251,15 @@ class AdminApplicationService:
         except AdminDependencyUnavailableError:
             raise ExternalSystemUnavailableError("LINE linkage is unavailable") from None
 
+    async def confirmed_job_notification_statuses(self, service_id, member_ids):
+        try:
+            rows = await self._lookup_linkage_items(self._line_scope(service_id), member_ids)
+            return {key: item.job_notification_status if item.line_linked else "not_linked"
+                    for key, item in rows.items()}
+        except AdminDependencyUnavailableError:
+            # A failed/incomplete batch is never a partially authorized recipient set.
+            return {key: "unknown" for key in member_ids}
+
     async def automatic_selection(self, service_id, job_id):
         job = await self.get_job(service_id, job_id)
         if job.status.value != "published":
@@ -311,6 +320,9 @@ class AdminApplicationService:
             can_send=valid and (limit is None or len(items) <= limit))
 
     async def _lookup_linkages(self, scope, member_ids):
+        return {key: item.line_linked for key, item in (await self._lookup_linkage_items(scope, member_ids)).items()}
+
+    async def _lookup_linkage_items(self, scope, member_ids):
         ids = tuple(dict.fromkeys(member_ids))
         lookup = {}
         try:
@@ -324,7 +336,9 @@ class AdminApplicationService:
                 returned = tuple(item.external_member_id for item in response.items)
                 if len(returned) != len(chunk) or set(returned) != set(chunk):
                     raise ValueError("linkage response identity mismatch")
-                lookup.update((item.external_member_id, item.line_linked) for item in response.items)
+                if any(not item.line_linked and item.job_notification_status != "unknown" for item in response.items):
+                    raise ValueError("inconsistent linkage preferences")
+                lookup.update((item.external_member_id, item) for item in response.items)
         except (LineInternalApiClientError, ValueError):
             raise AdminDependencyUnavailableError("LINE linkage lookup unavailable") from None
         return lookup

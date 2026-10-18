@@ -97,6 +97,9 @@ def build_production_admin_application(
     async def lookup_linkages(service_id, member_ids):
         return await application.confirmed_linkages(service_id, member_ids)
 
+    async def lookup_preferences(service_id, member_ids):
+        return await application.confirmed_job_notification_statuses(service_id, member_ids)
+
     notifications = NotificationService(
         repository=boundary.repository,
         external_business_gateway=external_business_gateway,
@@ -107,6 +110,7 @@ def build_production_admin_application(
         persist_line_subjects=False,
         reservation_guard=AdminSendCapabilityGuard(client=boundary.client, scope_resolver=scope_resolver),
         linkage_lookup=lookup_linkages,
+        recipient_status_lookup=lookup_preferences,
         selected_recipient_limit=LOCAL_MAX_SELECTED_RECIPIENTS if runtime_settings.app_env == "local" else None,
     )
     application = AdminApplicationService(

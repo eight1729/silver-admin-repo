@@ -27,11 +27,12 @@ async def test_real_admin_requests_and_line_scope_acceptance():
     peer = subprocess.Popen([sys.executable, str(Path(__file__).with_name("line_scope_peer.py")), str(backend)],
         cwd=backend, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8")
     calls = []
+    preferences = []
     def transport(request):
         calls.append((request.method, request.url.path))
         peer.stdin.write(json.dumps({"scopes": scopes, "method": request.method,
             "path": request.url.path, "headers": dict(request.headers),
-            "body": request.content.decode()}) + "\n")
+            "body": request.content.decode(), "preferences": preferences}) + "\n")
         peer.stdin.flush()
         reply = peer.stdout.readline()
         assert reply, "offline LINE peer exited unexpectedly"
@@ -41,6 +42,20 @@ async def test_real_admin_requests_and_line_scope_acceptance():
         async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as http:
             client = HttpLineInternalApiClient(client=http, base_url="https://offline.test",
                 bearer_token=SecretStr("offline-internal"), environment="production")
+            members = ("0007", "000008", "9" * 100, "absent")
+            preferences.extend({"org": "sumida_shrc", "service": "sumida", "member": member, "enabled": enabled}
+                               for member, enabled in zip(members, (True, False, None)))
+            request = LinkageStatusBatchRequest(scope=ServiceOrganizationScope(service_id="sumida", organization_id="sumida_shrc"), external_member_ids=members)
+            response = await client.batch_get_linkages(request)
+            preferences.clear()
+            assert tuple(item.external_member_id for item in response.items) == members
+            assert tuple(item.job_notification_status for item in response.items) == ("enabled", "opted_out", "unanswered", "unknown")
+            assert tuple(item.line_linked for item in response.items) == (True, True, True, False)
+            preferences.append({"org": "sumida_shrc", "service": "sumida", "member": "0007", "enabled": False})
+            assert (await client.batch_get_linkages(request)).items[0].job_notification_status == "opted_out"
+            preferences.clear()
+            other = request.model_copy(update={"scope": ServiceOrganizationScope(service_id="sandbox", organization_id="sandbox")})
+            assert all(not item.line_linked for item in (await client.batch_get_linkages(other)).items)
             for service, org in tuple(scopes.items()):
                 scope = ServiceOrganizationScope(service_id=service, organization_id=org)
                 calls_for_scope = [
@@ -69,7 +84,7 @@ async def test_real_admin_requests_and_line_scope_acceptance():
                     await client.batch_get_linkages(LinkageStatusBatchRequest(
                         scope=ServiceOrganizationScope(service_id=service, organization_id=org),
                         external_member_ids=("fictional-member",)))
-            assert len(calls) == 29
+            assert len(calls) == 32
     finally:
         peer.stdin.close()
         try:

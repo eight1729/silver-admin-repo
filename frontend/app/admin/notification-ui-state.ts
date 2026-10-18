@@ -106,7 +106,7 @@ export function uiStatePresentation(state: NotificationUiState) {
     validation_failed: { label: "検証不成立", description: "現在の内容は送信条件を満たしていません。表示された理由を確認してください。" },
     stale: { label: "再検証が必要", description: "内容が変更されたため、再検証が必要です。" },
     sending: { label: "送信中", description: "送信処理中です。ほかの操作は行わないでください。" },
-    sent: { label: "送信済み", description: "この通知operationは送信済みです。再送できません。" },
+    sent: { label: "配信処理終了", description: "実送信成功・未送信・失敗・結果不明の内訳を配信結果で確認してください。" },
     blocked: { label: "送信ブロック中", description: "現在の状態では送信できません。表示された理由を確認してください。" },
   } as const)[state];
 }
