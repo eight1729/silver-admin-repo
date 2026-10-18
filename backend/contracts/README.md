@@ -30,9 +30,12 @@ The Admin LINE-internal client consumes the distributable models in
 `app/contracts/admin_line_internal_v1.py`; production Admin code does not
 import the LINE provider's private schema module.
 
-The consumer copy is synchronized with LINE Internal v1 **1.1.1**. Existing
-request/response schemas are unchanged; the artifact adds scope-denial responses
-and the LINE recovery operation (which Admin does not call).
+The consumer copy is synchronized with LINE Internal v1 **1.2.0**. Batch linkage
+responses include `job_notification_status` for Admin preflight validation.
+The previous Admin consumer rejects this added field, so coordinate the Admin
+and LINE upgrade while notification processing is stopped; do not run the old
+Admin consumer against LINE 1.2.0. Scope-denial responses and the LINE recovery
+operation (which Admin does not call) remain part of the contract.
 
 The single incoming LINE Bearer identifies our Admin Backend; staff service
 authorization remains in Admin. LINE requires an exact service-to-organization

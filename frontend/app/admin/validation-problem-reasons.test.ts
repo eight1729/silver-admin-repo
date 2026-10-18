@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { validationProblemReasons } from "./validation-problem-reasons.ts";
+import { notificationReasonLabel } from "./notification-reasons.ts";
 
 test("successful validation retains counts and reasons but has no unselected problem", () => {
   const validation = Object.freeze({ selected_count: 1, sendable_count: 1,
@@ -35,9 +36,10 @@ test("SendOverview filters only detail reasons and keeps success and label rende
   assert.match(overview, /validationProblemReasons\(validation\.reasons\)\.forEach\(\(reason\) => problems\.add\(safeReasonLabel\(reason\)\)\)/);
   assert.doesNotMatch(overview, /validation\??\.reasons\.forEach/);
   assert.match(overview, /validation\.can_proceed && !hasProblem/);
-  assert.match(overview, /validated \? \{ icon: "✓", text: "問題ありません"/);
+  assert.match(overview, /validated \? \{ icon: "✓", text: validation!\.selected_count > validation!\.sendable_count \? "除外あり・送信可能者を確認" : "問題ありません"/);
   assert.match(overview, /problems\.size > 0 && <div className="send-problem-details"/);
-  assert.match(source, /line_not_linked: "LINE未連携"/);
-  assert.match(source, /job_closed: "求人募集終了"/);
-  assert.match(source, /job_version_changed: "求人情報更新あり"/);
+  assert.match(source, /import \{ notificationReasonLabel as safeReasonLabel \} from "\.\/notification-reasons"/);
+  assert.equal(notificationReasonLabel("line_not_linked"), "LINE未連携");
+  assert.equal(notificationReasonLabel("job_closed"), "求人募集終了");
+  assert.equal(notificationReasonLabel("job_version_changed"), "求人情報更新あり");
 });
