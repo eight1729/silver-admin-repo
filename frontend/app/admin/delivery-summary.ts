@@ -2,7 +2,7 @@ import type { AdminDeliveries, DeliveryStatus } from "../lib/admin-api";
 
 export const deliveryStatusPresentation: ReadonlyArray<{ status: DeliveryStatus; label: string; color: string }> = [
   { status: "sent", label: "送信済み", color: "#2f7d5c" },
-  { status: "failed", label: "送信失敗", color: "#b44d4d" },
+  { status: "failed", label: "未送信・失敗", color: "#b44d4d" },
   { status: "unknown", label: "結果不明", color: "#a96d16" },
   { status: "skipped", label: "対象外", color: "#68747d" },
   { status: "pending", label: "処理待ち", color: "#8d9aa3" },

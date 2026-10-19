@@ -1,4 +1,5 @@
 "use client";
+import { notificationReasonLabel } from "./notification-reasons";
 import { useEffect, useRef, useState } from "react";
 import { adminApi, adminErrorMessage, type AdminCandidate, type AdminDeliveries, type AdminConfirmation, type AdminJobDetail,
   type AdminJobSummary, type AdminLineSendMode, type AdminMessage, type AdminOperation } from "../lib/admin-api";
@@ -308,7 +309,7 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
     </>}><p>保存済みの通知は削除しません。送信済みの場合は、同じ内容を重複送信しないよう結果を確認してください。</p></Modal>}
     <p><a className="admin-link" href="/admin?mode=manual">マニュアル選択へ</a>　<a className="admin-link" href="/admin/jobs">求人一覧へ</a></p>
     {open && confirmation && <Modal placement="center" title="送信前の最終確認" onClose={() => { if (!busy) setOpen(false); }} footer={<>
-      <button className="admin-button" disabled={!canSend} onClick={() => void send()}>送信</button>
+      <button className="admin-button" disabled={!canSend} onClick={() => void send()}>{confirmation.excluded_count > 0 ? `除外理由を確認して送信可能な${confirmation.sendable_count}名に送信` : "送信"}</button>
       <button className="admin-button secondary" disabled={busy} onClick={() => edit("members")}>会員を選択</button>
       <button className="admin-button secondary" disabled={busy} onClick={() => edit("message")}>通知文編集</button>
     </>}>
@@ -321,7 +322,7 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
       {([true, false] as const).map(sendable => <section key={String(sendable)}><h3>{sendable ? "送信可能会員" : "除外会員"}</h3>
         <ul className="automatic-recipient-list">{confirmation.targets.filter(t => (t.disposition === "send") === sendable).map(t => <li key={t.member_id}>
           {t.member_number ?? "番号未取得"}・{t.display_name ?? "氏名取得不可"}・携帯下4桁：{t.mobile_phone_last4 ?? "未登録"}
-          {!sendable && <span> ／ {t.reason ?? "再検証が必要"}</span>}
+          {!sendable && <span> ／ {notificationReasonLabel(t.reason)}</span>}
         </li>)}</ul></section>)}
     </Modal>}
   </AdminRouteFrame>;

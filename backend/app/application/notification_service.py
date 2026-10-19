@@ -274,7 +274,7 @@ def _validation_snapshot(summary: NotificationValidationSummary) -> dict:
 
 
 def _expected(operation):
-    return {"expected_operation": operation} if automatic_context(operation) is not None else {}
+    return {"expected_operation": operation}
 
 
 def _snapshot_for(operation, summary):
@@ -284,7 +284,9 @@ def _snapshot_for(operation, summary):
         context = dict(context)
         excluded = dict(context["excluded"])
         for item in summary.target_results:
-            if item.selected and item.delivery_disposition is not ValidationDisposition.SEND:
+            if (item.selected and item.delivery_disposition is not ValidationDisposition.SEND
+                    and item.reason not in {"notification_opted_out", "notification_preferences_unanswered",
+                                           "notification_preferences_unavailable"}):
                 excluded.setdefault(item.member_id, {"reason": item.reason or "member_ineligible", "disposition": item.delivery_disposition.value})
         context["excluded"] = excluded
         snapshot["automatic_selection"] = context
@@ -316,6 +318,7 @@ class NotificationService:
         reservation_guard: Callable[[str, int], Awaitable[None]] | None = None,
         selected_recipient_limit: int | None = None,
         linkage_lookup: Callable[[str, tuple[str, ...]], Awaitable[dict[str, bool]]] | None = None,
+        recipient_status_lookup: Callable[[str, tuple[str, ...]], Awaitable[dict[str, str]]] | None = None,
     ) -> None:
         self._repository = repository
         self._external_business_gateway = external_business_gateway
@@ -333,6 +336,7 @@ class NotificationService:
         self._reservation_guard = reservation_guard
         self._selected_recipient_limit = selected_recipient_limit
         self._linkage_lookup = linkage_lookup
+        self._recipient_status_lookup = recipient_status_lookup
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -617,8 +621,19 @@ class NotificationService:
             )
         external_organization_id = external_organization_id.strip()
 
+        recipient_statuses = {}
         try:
-            if automatic_context(operation) is not None:
+            if self._recipient_status_lookup is not None:
+                try:
+                    recipient_statuses = await self._recipient_status_lookup(command.service_id, tuple(t.member_id for t in selected))
+                except ExternalSystemUnavailableError:
+                    recipient_statuses = {}
+                if (set(recipient_statuses) != {t.member_id for t in selected}
+                        or any(v not in {"enabled", "opted_out", "unanswered", "not_linked", "unknown"} for v in recipient_statuses.values())):
+                    recipient_statuses = {t.member_id: "unknown" for t in selected}
+                targets = tuple(replace(t, line_linked=recipient_statuses[t.member_id] != "not_linked")
+                                if t.selected and recipient_statuses[t.member_id] != "unknown" else t for t in targets)
+            elif automatic_context(operation) is not None:
                 if self._linkage_lookup is None:
                     raise ExternalSystemUnavailableError("LINE linkage is unavailable")
                 linkage = await self._linkage_lookup(command.service_id, tuple(t.member_id for t in selected))
@@ -729,7 +744,7 @@ class NotificationService:
             )
 
         items, updated_targets, target_difference = self._target_results(
-            operation, targets, validation, candidates, now
+            operation, targets, validation, candidates, now, recipient_statuses
         )
         reconfirm = reconfirm or target_difference
         if automatic_context(operation) is not None and (not job_valid or not version_matches or not _message_valid(operation.message)):
@@ -773,7 +788,7 @@ class NotificationService:
         )
         return summary
 
-    def _target_results(self, operation, targets, validation, candidates, now):
+    def _target_results(self, operation, targets, validation, candidates, now, recipient_statuses=None):
         validations = {item.external_member_id: item for item in validation.members}
         candidate_map = {item.external_member_id: item for item in candidates}
         enforce_candidate = (
@@ -820,6 +835,17 @@ class NotificationService:
                     reason_code = None
                     reason = None
                     disposition = ValidationDisposition.SEND
+            # Preference checks only narrow permission; preserve business validation
+            # failures and the existing explicit exclusion policy.
+            preference = (recipient_statuses or {}).get(target.member_id)
+            if target.selected and preference == "unknown":
+                reason = "notification_preferences_unavailable"
+                disposition = ValidationDisposition.BLOCK
+                eligible = False
+            elif disposition is ValidationDisposition.SEND and preference in {"opted_out", "unanswered"}:
+                reason = "notification_opted_out" if preference == "opted_out" else "notification_preferences_unanswered"
+                disposition = ValidationDisposition.SKIP
+                eligible = False
             updated_record = replace(
                 target, eligibility=reason_code, reason=reason, updated_at=now
             )
@@ -983,7 +1009,8 @@ class NotificationService:
         confirmed = operation
         confirmed_targets = await self._repository.get_targets(command.service_id, command.operation_id)
         auto = automatic_context(confirmed)
-        if auto is not None:
+        requires_confirmation = auto is not None or self._recipient_status_lookup is not None
+        if requires_confirmation:
             if (not command.confirmation_token or confirmed.validated_at is None
                     or command.confirmation_token != confirmation_identity(confirmed, confirmed_targets)):
                 raise OperationNotSendableError("staff confirmation is stale or missing")
@@ -1008,13 +1035,13 @@ class NotificationService:
                 or operation.validated_at != summary.validated_at
                 or operation.validation_snapshot != freeze_mapping(_snapshot_for(operation, summary))):
             raise OperationNotSendableError("operation changed after validation")
-        if auto is not None:
+        if requires_confirmation:
             fresh_send = {i.member_id for i in summary.target_results if i.selected and i.delivery_disposition is ValidationDisposition.SEND}
             fresh_selected = {i.member_id for i in summary.target_results if i.selected}
             if (fresh_send != confirmed_send or fresh_selected != {t.member_id for t in confirmed_targets if t.selected}
                     or operation.message_hash != confirmed.message_hash or operation.message_version != confirmed.message_version
                     or operation.job_id != confirmed.job_id or operation.job_version != confirmed.job_version
-                    or automatic_context(operation)["revision"] != auto["revision"]):
+                    or (auto is not None and automatic_context(operation)["revision"] != auto["revision"])):
                 raise OperationNotSendableError("confirmed recipients or message changed; reconfirm required")
         if not summary.can_proceed or summary.requires_staff_reconfirmation:
             now = self._now()

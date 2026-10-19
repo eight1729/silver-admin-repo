@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { notificationReasonLabel } from "./notification-reasons";
 import type { AdminDeliveries, AdminOperation } from "../lib/admin-api";
 import { createDeliveryGradient, summarizeDeliveries } from "./delivery-summary";
 import { containsNewHistory, paginateHistory } from "./history-pagination";
@@ -12,13 +13,23 @@ export function DeliverySummaryPanel({ operation, deliveries, loading, error, re
   const summary = summarizeDeliveries(deliveries);
   const gradient = createDeliveryGradient(summary.items, summary.total);
   const legendColumns = [summary.items.slice(0, 3), summary.items.slice(3)];
+  const reasons = new Map<string, number>();
+  for (const item of new Map(deliveries.items.map(item => [item.delivery_id, item])).values()) {
+    if (item.status === "sent" || item.status === "pending") continue;
+    const label = item.status === "unknown" ? "結果不明・自動再送なし" : notificationReasonLabel(item.reason_code);
+    reasons.set(label, (reasons.get(label) ?? 0) + 1);
+  }
   return <div className="delivery-summary-panel">
+    <p role="status">{deliveries.items.some(item => item.status === "pending") ? "送信受付済み・配信処理中" : "配信処理終了"}：実送信成功 {summary.items.find(item => item.status === "sent")?.count ?? 0}件</p>
     <div className="delivery-summary-cards">{summary.items.map((item) => <div className={`delivery-summary-card delivery-summary-card--${item.status}`} key={item.status}><span>{item.label}</span><strong>{item.count}件</strong></div>)}</div>
     <div className="delivery-summary-body">
       <div className="delivery-donut" role="img" aria-label={`現在のoperationの配信結果、合計${summary.total}件`} style={{ background: gradient }}><span><strong>{summary.total}</strong><small>合計</small></span></div>
       <div className="delivery-legend">{legendColumns.map((column, columnIndex) => <dl className="delivery-legend-column" key={columnIndex}>{column.map((item) => <div className="delivery-legend-item" key={item.status}><dt><span className="delivery-legend-bar" style={{ backgroundColor: item.color }} aria-hidden="true" />{item.label}</dt><dd>{item.count}件 <span>（{((item.count / summary.total) * 100).toFixed(1)}%）</span></dd></div>)}</dl>)}</div>
     </div>
     {summary.items.find((item) => item.status === "unknown")?.count ? <p className="admin-info">結果不明の通知は送信結果を確定できません。自動再送は行われません。</p> : null}
+    <ul aria-label="未送信・失敗の理由">{[...reasons].map(([label, count]) => <li key={label}>
+      {label}：{count}件
+    </li>)}</ul>
   </div>;
 }
 

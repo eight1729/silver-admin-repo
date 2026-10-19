@@ -1,5 +1,5 @@
 from app.core.jobs_diagnostics import jobs_failure
-from app.application.automatic_selection import automatic_context
+from app.application.automatic_selection import automatic_context, confirmation_identity
 
 from collections import Counter
 from uuid import UUID, uuid4
@@ -34,6 +34,7 @@ from app.domain.enums.enums import DeliveryStatus, OperationStatus
 from app.domain.errors.errors import (
     ExternalJobNotFoundError,
     ExternalSystemUnavailableError,
+    ExternalTargetLimitExceededError,
     QueueError,
 )
 from app.domain.models.staff import AuthenticatedStaff
@@ -82,6 +83,8 @@ def _translate(exc: Exception) -> None:
     if isinstance(exc, ReservedNotificationMutationError):
         raise HTTPException(status_code=409, detail={"error": "operation_conflict"})
     exc = normalize_admin_exception(exc)
+    if isinstance(exc, ExternalTargetLimitExceededError):
+        raise HTTPException(status_code=422, detail={"error": "external_target_limit_exceeded"})
     if isinstance(exc, AdminExternalSystemUnavailableError):
         raise HTTPException(
             status_code=503, detail={"error": "external_system_unavailable"}
@@ -339,22 +342,28 @@ async def validate_operation(
             staff_id=staff.staff_id,
             request_id=_request_id(),
         )
-        operation = (await service.get_operation(staff.service_id, operation_id)).operation
+        current = await service.get_operation(staff.service_id, operation_id)
+        operation = current.operation
         reasons = tuple(
             sorted({item.reason for item in summary.target_results if item.reason})
         )
         if summary.blocking_reason:
             reasons = tuple(sorted(set(reasons) | {summary.blocking_reason}))
-        selected = tuple(t for t in (await service.get_operation(staff.service_id, operation_id)).targets if t.selected)
+        selected = tuple(t for t in current.targets if t.selected)
         by_id = {i.member_id: i for i in summary.target_results if i.selected}
+        confirmed = (summary.can_proceed and not summary.requires_staff_reconfirmation
+                     and operation.status == OperationStatus.READY
+                     and operation.validated_at == summary.validated_at
+                     and set(by_id) == {t.member_id for t in selected})
         return AdminValidationResponse(
+            confirmation_token=confirmation_identity(operation, current.targets) if confirmed else None,
             target_results=tuple(AdminValidationTargetResponse(member_id=t.member_id,
                 disposition=by_id[t.member_id].delivery_disposition.value if t.member_id in by_id else "block",
                 reason=by_id[t.member_id].reason if t.member_id in by_id else summary.blocking_reason or "revalidation_required") for t in selected),
             requires_staff_reconfirmation=summary.requires_staff_reconfirmation,
             operation_id=operation_id,
             status=operation.status,
-            can_proceed=summary.can_proceed,
+            can_proceed=confirmed,
             selected_count=summary.selected_target_count,
             sendable_count=summary.eligible_count,
             skipped_count=summary.skipped_count,

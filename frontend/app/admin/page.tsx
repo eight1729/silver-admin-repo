@@ -1,4 +1,5 @@
 "use client";
+import { notificationReasonLabel as reasonLabel } from "./notification-reasons";
 
 import { useLoadingTasks } from "./use-loading-tasks";
 import { notificationEntryUrl } from "./automatic-workflow";
@@ -477,7 +478,7 @@ function ManualAdminPage({ initialJobId, resumeOperationId }: { initialJobId: st
     setQueueFailure(false); setDeliveriesError("");
     try {
       const result = await sendThenLoadDeliveries({
-        operationId: operation.operation_id, send: (id) => track("通知を送信中…", () => adminApi.send(id)), loadDeliveries: (id) => track("送信結果を取得中…", () => adminApi.deliveries(id)),
+        operationId: operation.operation_id, send: (id) => track("通知を送信中…", () => adminApi.send(id, validation?.confirmation_token ?? undefined)), loadDeliveries: (id) => track("送信結果を取得中…", () => adminApi.deliveries(id)),
         onSent: (sent) => { setOperation(sent); setStep("result"); setDeliveriesLoading(true); },
       });
       if (validationInputRef.current.operationId === operation.operation_id) { setDeliveries(result.deliveries); setDeliveriesOperationId(result.deliveries ? operation.operation_id : null); }
@@ -522,7 +523,7 @@ function ManualAdminPage({ initialJobId, resumeOperationId }: { initialJobId: st
       {!job || !operation ? <p className="admin-panel-empty">対象候補会員を保存すると、通知文を編集できます。</p> : step === "edit" && !workflowState.terminal ? <MessageEditorPanel job={job} message={message} setMessage={changeMessage} selectedTemplate={selectedTemplate} applyTemplate={applyTemplate} centerDisplayNameDraft={centerDisplayNameDraft} setCenterDisplayNameDraft={setCenterDisplayNameDraft} noticeDraft={noticeDraft} setNoticeDraft={setNoticeDraft} applyEditorFields={applyEditorFields} editorFieldsChanged={centerDisplayNameDraft.trim() !== centerDisplayName || noticeDraft.trim() !== appliedNotice} busy={busy} validationStale={workflowState.state === "stale"} lineSendMode={lineSendMode} notificationLink={notificationLink} /> : <MessageReadOnlySummary message={operation.message} edit={step === "confirm" && validation !== null && validationCurrent && !workflowState.terminal && workflowAction !== "sending" ? () => setStep("edit") : undefined} />}
     </AdminPanel>
     <AdminPanel number={4} title="送信前確認">
-      {step === "confirm" && operation && validation ? <SendConfirmationPanel operation={operation} validation={queueFailure ? { ...validation, can_proceed: false } : validation} candidates={candidates} selected={selected} save={saveMessage} send={fakeSend} revalidate={validate} busy={busy} canSaveDraft={workflowState.canSaveDraft} canValidate={workflowState.canValidate} canSend={workflowState.canSend} validationCurrent={validationCurrent} action={workflowAction} targets={() => setStep("detail")} lineSendMode={lineSendMode} queueFailure={queueFailure} /> : step === "result" && operation ? <div className="completion-notice" role="status"><strong>送信処理は完了しています。</strong><p>{operation.status === "completed_with_errors" ? "一部の配信で失敗または結果不明があります。配信状況サマリーを確認してください。" : "配信状況サマリーで結果を確認してください。"}</p><p>結果不明の通知は自動再送されません。</p></div> : <SendPreparationState operation={operation} validation={validation} candidates={candidates} selected={selected} save={saveMessage} validate={validate} canSaveDraft={workflowState.canSaveDraft} canValidate={workflowState.canValidate} busy={busy} action={workflowAction} validationCurrent={validationCurrent} lineSendMode={lineSendMode} />}
+      {step === "confirm" && operation && validation ? <SendConfirmationPanel operation={operation} validation={queueFailure ? { ...validation, can_proceed: false } : validation} candidates={candidates} selected={selected} save={saveMessage} send={fakeSend} revalidate={validate} busy={busy} canSaveDraft={workflowState.canSaveDraft} canValidate={workflowState.canValidate} canSend={workflowState.canSend} validationCurrent={validationCurrent} action={workflowAction} targets={() => setStep("detail")} lineSendMode={lineSendMode} queueFailure={queueFailure} /> : step === "result" && operation ? <div className="completion-notice" role="status"><strong>{workflowState.terminal ? "配信処理は終了しています。" : "送信を受け付けました。配信結果を確認中です。"}</strong><p>{operation.status === "completed_with_errors" ? "未送信・失敗・結果不明を含みます。配信状況サマリーで理由と実送信成功件数を確認してください。" : "配信状況サマリーで結果を確認してください。"}</p><p>結果不明の通知は自動再送されません。</p></div> : <SendPreparationState operation={operation} validation={validation} candidates={candidates} selected={selected} save={saveMessage} validate={validate} canSaveDraft={workflowState.canSaveDraft} canValidate={workflowState.canValidate} busy={busy} action={workflowAction} validationCurrent={validationCurrent} lineSendMode={lineSendMode} />}
     </AdminPanel>
     </div>
     <div className="admin-lower-workspace">
@@ -576,5 +577,4 @@ function stepTitle(step: Step) { return ({ jobs:"求人一覧",detail:"求人詳
 function jobStatus(value: AdminJobSummary["status"]) { return value === "closed" ? "終了" : jobStatusLabel(value); }
 function statusLabel(value: string) { return ({ draft:"下書き",validating:"確認中",ready:"送信準備完了",blocked_external_system:"外部情報確認不可",sending:"送信処理中",completed:"完了",completed_with_errors:"一部エラーで完了",cancelled:"取消",sent:"送信済み",failed:"失敗",unknown:"結果不明",skipped:"対象外",pending:"処理待ち" } as Record<string,string>)[value] ?? value; }
 function notificationTypeLabel(value: NotificationType) { return ({ new_job_match:"新着求人マッチ",existing_job_match:"既存求人マッチ",custom_job:"個別求人" })[value]; }
-function reasonLabel(value: string | null) { if (!value) return "—"; return ({ line_not_linked:"LINE未連携",not_selected:"未選択",member_ineligible:"対象外",job_closed:"求人終了",job_version_changed:"求人version変更",recipient_unavailable:"送信先を利用できません",line_temporary_error:"一時的な送信エラー",line_unknown_result:"送信結果不明" } as Record<string,string>)[value] ?? "対象条件を満たしません"; }
 function formatTime(value: string | null) { return value ? new Intl.DateTimeFormat("ja-JP", { dateStyle:"medium", timeStyle:"short" }).format(new Date(value)) : "—"; }

@@ -132,6 +132,17 @@
             "title": "External Member Id",
             "type": "string"
           },
+          "job_notification_status": {
+            "default": "unknown",
+            "enum": [
+              "enabled",
+              "opted_out",
+              "unanswered",
+              "unknown"
+            ],
+            "title": "Job Notification Status",
+            "type": "string"
+          },
           "line_linked": {
             "title": "Line Linked",
             "type": "boolean"
@@ -345,6 +356,31 @@
         "title": "NotificationResult",
         "type": "object"
       },
+      "RecoveryCycleResponse": {
+        "additionalProperties": false,
+        "description": "Processed counts pipeline invocations, including failures, not sent messages.",
+        "properties": {
+          "processed_count": {
+            "minimum": 0.0,
+            "title": "Processed Count",
+            "type": "integer"
+          },
+          "stop_reason": {
+            "enum": [
+              "batch_complete",
+              "time_budget"
+            ],
+            "title": "Stop Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "processed_count",
+          "stop_reason"
+        ],
+        "title": "RecoveryCycleResponse",
+        "type": "object"
+      },
       "SendCapabilityRequest": {
         "additionalProperties": false,
         "properties": {
@@ -554,7 +590,7 @@
   "info": {
     "description": "Versioned contract owned by the LINE API provider. This Phase 1 application describes interfaces only.",
     "title": "Silver LINE Internal API Contract",
-    "version": "1.0.0"
+    "version": "1.2.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -582,6 +618,18 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": {
+                    "error": "scope_forbidden"
+                  }
+                }
+              }
+            },
+            "description": "Authenticated caller is not allowed to access the business scope"
           },
           "422": {
             "content": {
@@ -630,6 +678,18 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": {
+                    "error": "scope_forbidden"
+                  }
+                }
+              }
+            },
+            "description": "Authenticated caller is not allowed to access the business scope"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -676,6 +736,18 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": {
+                    "error": "scope_forbidden"
+                  }
+                }
+              }
+            },
+            "description": "Authenticated caller is not allowed to access the business scope"
           },
           "422": {
             "content": {
@@ -726,6 +798,18 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": {
+                    "error": "scope_forbidden"
+                  }
+                }
+              }
+            },
+            "description": "Authenticated caller is not allowed to access the business scope"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -743,6 +827,45 @@
           }
         ],
         "summary": "Get Notification Result",
+        "tags": [
+          "notification-command"
+        ]
+      }
+    },
+    "/internal/v1/notification-commands:recover": {
+      "post": {
+        "description": "Contract declaration only; runtime awaits one authenticated cycle.",
+        "operationId": "recover_notification_commands_internal_v1_notification_commands_recover_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCycleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": {
+                    "error": "scope_forbidden"
+                  }
+                }
+              }
+            },
+            "description": "Authenticated caller is not allowed to access the business scope"
+          }
+        },
+        "security": [
+          {
+            "LineInternalBearer": []
+          }
+        ],
+        "summary": "Recover Notification Commands",
         "tags": [
           "notification-command"
         ]
@@ -771,6 +894,18 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": {
+                    "error": "scope_forbidden"
+                  }
+                }
+              }
+            },
+            "description": "Authenticated caller is not allowed to access the business scope"
           },
           "422": {
             "content": {
@@ -819,6 +954,18 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": {
+                    "error": "scope_forbidden"
+                  }
+                }
+              }
+            },
+            "description": "Authenticated caller is not allowed to access the business scope"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -843,6 +990,6 @@
     }
   },
   "x-contract-owner": "LINE Repository",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "1.2.0",
   "x-phase": "phase-1-contract-only"
 }

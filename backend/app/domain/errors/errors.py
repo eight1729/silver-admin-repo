@@ -22,6 +22,10 @@ class ExternalBusinessNotConfiguredError(ExternalBusinessError):
     pass
 
 
+class ExternalTargetLimitExceededError(ExternalBusinessError):
+    """The selected set exceeds the business provider's validation contract."""
+
+
 class LineAuthError(DomainError):
     pass
 

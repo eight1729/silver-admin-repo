@@ -28,8 +28,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -44,6 +46,7 @@ from app.domain.errors.errors import (
     ExternalJobNotFoundError,
     ExternalMemberNotFoundError,
     ExternalSystemUnavailableError,
+    ExternalTargetLimitExceededError,
 )
 from app.domain.models.external_business import (
     CandidateMember,
@@ -144,6 +147,41 @@ def _decision_flag(value, field: str) -> bool:
     """
     if value is not True and value is not False:
         raise _unavailable(f"a non-boolean {field}")
+    return value
+
+
+def _created_at(value) -> datetime | None:
+    result = _parse_datetime(value)
+    if result is None or result.utcoffset() != timedelta(0):
+        return None
+    return result
+
+
+def _mobile_last4(value) -> str | None:
+    return value if isinstance(value, str) and re.fullmatch(r"[0-9]{4}", value) else None
+
+
+def _member_number(value) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]+", value):
+        raise _unavailable("an invalid member number")
+    return value
+
+
+def _recommendation_level(value) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or not 1 <= value <= 5:
+        raise _unavailable("an invalid recommendation level")
+    return value
+
+
+def _distance_km(value) -> float | None:
+    if value is None:
+        return None
+    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        raise _unavailable("an invalid distance")
     return value
 
 
@@ -258,6 +296,10 @@ class HttpExternalBusinessGateway:
         return ExternalMemberSummary(
             external_member_id=returned,
             display_label=_optional_text(body.get("display_label")),
+            # migak confirms member_number is exactly external_member_id.
+            # Keep this provider mapping after the response identity check.
+            member_number=returned,
+            mobile_phone_last4=_mobile_last4(body.get("mobile_last4")),
         )
 
     async def check_link_eligibility(
@@ -331,6 +373,7 @@ class HttpExternalBusinessGateway:
             status=_job_status(body.get("status")),
             version=_required_text(body.get("version"), "job version"),
             updated_at=_parse_datetime(body.get("updated_at")),
+            created_at=_created_at(body.get("created_at")),
             staff_notes=_optional_text(body.get("staff_notes")),
             job_url=_optional_text(body.get("job_url")),
         )
@@ -342,6 +385,7 @@ class HttpExternalBusinessGateway:
             "GET",
             f"/v1/orgs/{_segment(external_organization_id)}/jobs"
             f"/{_job_segment(external_job_id)}/candidate-members",
+            params={"all": "true"},
             not_found=ExternalJobNotFoundError,
         )
         if not isinstance(body, list):
@@ -362,6 +406,10 @@ class HttpExternalBusinessGateway:
         expected_job_version: str,
         external_member_ids: list[str],
     ) -> NotificationValidationResult:
+        # This is a business API request limit, independent of LINE send limits.
+        # Keep the set intact: splitting validation would change its semantics.
+        if len(external_member_ids) > 500:
+            raise ExternalTargetLimitExceededError("external validation target limit is 500")
         body = _object(await self._request(
             "POST",
             f"/v1/orgs/{_segment(external_organization_id)}/jobs"
@@ -462,6 +510,7 @@ class HttpExternalBusinessGateway:
             # staleness check silently pass.
             version=_required_text(item.get("version"), "job version"),
             updated_at=_parse_datetime(item.get("updated_at")),
+            created_at=_created_at(item.get("created_at")),
             work_days=_optional_text(item.get("work_days")),
             work_time=_optional_text(item.get("work_time")),
         )
@@ -487,6 +536,9 @@ class HttpExternalBusinessGateway:
             # carries one.
             line_subject=None,
             preference_summary=_optional_text(item.get("preference_summary")),
+            member_number=_member_number(item.get("member_number")),
+            recommendation_level=_recommendation_level(item.get("recommendation_level")),
+            distance_km=_distance_km(item.get("distance_km")),
         )
 
     @staticmethod

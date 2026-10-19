@@ -30,6 +30,32 @@ The Admin LINE-internal client consumes the distributable models in
 `app/contracts/admin_line_internal_v1.py`; production Admin code does not
 import the LINE provider's private schema module.
 
+The consumer copy is synchronized with LINE Internal v1 **1.2.0**. Batch linkage
+responses include `job_notification_status` for Admin preflight validation.
+The previous Admin consumer rejects this added field, so coordinate the Admin
+and LINE upgrade while notification processing is stopped; do not run the old
+Admin consumer against LINE 1.2.0. Scope-denial responses and the LINE recovery
+operation (which Admin does not call) remain part of the contract.
+
+The single incoming LINE Bearer identifies our Admin Backend; staff service
+authorization remains in Admin. LINE requires an exact service-to-organization
+mapping and returns `403 / scope_forbidden` for unauthorized scopes. Admin treats
+submission denial as permanent failure, never as an unlinked member or success.
+For an already accepted command, this denial on result GET ends local polling as
+`unknown` / `line_result_scope_forbidden`, because delivery may already have
+occurred. It never resubmits the command, and it preserves any concurrent terminal
+result. Restoring configuration does not automatically retry this unknown result;
+an operator must investigate it before considering any further action. Deep-link
+failures use the existing safe 503 dependency response. Capability failures keep
+sending disabled.
+
+`tests/test_line_scope_integration.py` runs real Admin HTTP serialization against
+the sibling `silver-line-repo/backend` ASGI routes over a subprocess stdio bridge.
+It uses fictional values and disposable SQLite with LINE's network/dotenv guards;
+no real server, DB or LINE connection is required. It explicitly skips when the
+sibling checkout is unavailable. Run it together with `test_line_scope_failure.py`
+from `backend` for the cross-repository scope and Admin failure-convergence checks.
+
 ## Admin internal business API (Slice 1.2)
 
 `admin-internal-api-v1.openapi.json` is owned by the **Admin Repository**, which

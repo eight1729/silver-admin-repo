@@ -13,7 +13,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 CONTRACT_ARTIFACT = "line-internal-api-v1.openapi.json"
-CONTRACT_VERSION = "1.0.0"
+CONTRACT_VERSION = "1.2.0"
 
 
 class ContractModel(BaseModel):
@@ -78,6 +78,7 @@ class LinkageStatusBatchRequest(ContractModel):
 class LinkageStatusItem(ContractModel):
     external_member_id: str = Field(min_length=1, max_length=128)
     line_linked: bool
+    job_notification_status: Literal["enabled", "opted_out", "unanswered", "unknown"] = "unknown"
 
 
 class LinkageStatusBatchResponse(ContractModel):

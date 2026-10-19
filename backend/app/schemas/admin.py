@@ -131,6 +131,7 @@ class AdminSendRequest(BaseModel):
 
 
 class AdminValidationResponse(BaseModel):
+    confirmation_token: str | None = None
     target_results: tuple[AdminValidationTargetResponse, ...] = ()
     requires_staff_reconfirmation: bool = False
     operation_id: UUID

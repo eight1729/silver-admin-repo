@@ -22,7 +22,7 @@ export function buildOperationHistory(operation: AdminOperation | null, jobName:
     items.push({ id: `validated-${operation.operation_id}`, operationId: operation.operation_id, jobName: title, name: "事前検証", status: validationPassed ? "検証済み" : "検証不成立", occurredAt: operation.validated_at, description: validationPassed ? "送信前の検証が完了しました。" : "送信条件を満たさない検証結果でした。" });
   }
   if (operation.send_requested_at) items.push({ id: `requested-${operation.operation_id}`, operationId: operation.operation_id, jobName: title, name: "送信受付", status: "受付済み", occurredAt: operation.send_requested_at, description: "送信処理が受け付けられました。" });
-  if (operation.completed_at) items.push({ id: `completed-${operation.operation_id}`, operationId: operation.operation_id, jobName: title, name: "送信処理", status: operation.status === "completed" ? "完了" : "一部エラーで完了", occurredAt: operation.completed_at, description: "現在のoperationの送信処理が完了しました。" });
+  if (operation.completed_at) items.push({ id: `completed-${operation.operation_id}`, operationId: operation.operation_id, jobName: title, name: "送信処理", status: "配信処理終了", occurredAt: operation.completed_at, description: "実送信成功・未送信・失敗・結果不明の内訳は配信結果で確認してください。" });
   const uniqueDeliveries = new Map((deliveries?.items ?? []).map((delivery) => [delivery.delivery_id, delivery]));
   for (const delivery of uniqueDeliveries.values()) {
     if (delivery.status === "pending") continue;
