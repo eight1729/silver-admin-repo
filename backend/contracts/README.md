@@ -88,3 +88,9 @@ Admin Staff API is consumed by the Admin Frontend. LINE Internal API v1 is owned
 by the LINE repository and consumed here. Generate provider artifacts, copy the
 versioned file to the consumer, compare bytes or hashes, and run compatibility
 tests. No shared Python contract package is used.
+
+## Notification safety revision 1.2.1
+
+The LINE internal artifact is synchronized at 1.2.1. Wire fields/statuses stay compatible with 1.2.0. Final text includes separators, canonical URL and local prefix and is limited to 5,000 UTF-16 units. Generic provider 400 is bad_request. New never-called invalid messages become failed/message_too_long or failed/invalid_message; refusal after a possible call is unknown/preference_changed_after_call. Existing ambiguous pending bodies/keys are never rewritten. Admin validation additionally returns validated_at for UI freshness. Admin result and skipped counts use frozen selection S; legacy history is projected only with consistent saved evidence.
+
+会員ライフサイクル更新: Admin内部契約1.1.0、LINE内部契約2.0.0。指定のartifactファイル名とURLは維持しますが、LINEの必須世代追加は破壊的変更です。旧新モデルを停止区間なしに混在させないでください。

@@ -183,11 +183,11 @@ async def test_snapshot_freeze_in_repository_and_service(db):
     repo, now, op, items = await seed(db, reserved=False)
     changed = replace(op, message=replace(op.message, note="edited"))
     await repo.update_operation("svc", op.operation_id, changed)
-    NotificationService._ensure_editable(changed)
+    await NotificationService(repository=repo)._ensure_editable(changed)
     repo, now, op, items = await seed(db)
     reserved = await repo.get_operation("svc", op.operation_id)
     with pytest.raises(OperationNotEditableError):
-        NotificationService._ensure_editable(reserved)
+        await NotificationService(repository=repo)._ensure_editable(reserved)
     with pytest.raises(RepositoryStateError):
         await repo.update_operation("svc", op.operation_id, replace(reserved, message_hash="changed"))
     # Stale editor read before reservation must not remove send_requested_at.

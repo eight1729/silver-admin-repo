@@ -1,3 +1,4 @@
+import { finalNotificationText } from "./notification-text";
 import { notificationReasonLabel as safeReasonLabel } from "./notification-reasons";
 import { JobDateFilter } from "./JobDateFilter";
 import { filterRegisteredJobs, formatJobRegistration } from "./job-registration";
@@ -157,11 +158,14 @@ export function MessageEditorPanel({ job, message, setMessage, selectedTemplate,
   notificationLink: string | null;
 }) {
   const body = notificationBody(message);
+  const completedText = finalNotificationText(message, notificationLink, lineSendMode);
   const valid = Object.values(message).every((value) => value.trim());
   const liveReady = isLiveMode(lineSendMode) && canAttemptSend(lineSendMode);
   const canonicalLink = liveReady ? notificationLink : job.job_url;
   return <div className="major-panel-content">
     <div className="notification-message-heading"><label htmlFor="notification-body">通知メッセージ</label><select aria-label="通知テンプレート" value={selectedTemplate} disabled={busy} onChange={(event) => applyTemplate(event.target.value as SelectedTemplateId)}><option value="custom" disabled>カスタム</option>{notificationTemplates.map((template) => <option value={template.id} key={template.id} disabled={template.requiresJob && !job}>{template.label}</option>)}</select></div>
+    <p role="status">完成文: {completedText === null ? "リンク・送信設定の確認待ち" : `${completedText.length} / 5,000 UTF-16単位`}</p>
+    {completedText !== null && completedText.length > 5000 && <p role="alert">完成文が上限を超えています。本文を短くして再保存してください。</p>}
     <div className="notification-body-field"><textarea id="notification-body" value={body} onChange={(event) => setMessage(composeAdminMessage(event.target.value, message.note))} aria-describedby="notification-body-count" /><small id="notification-body-count" aria-live="polite">{body.length}文字</small></div>
     <div className="compact-editor-field"><span>求人リンク</span><output className="readonly-canonical-url">{canonicalLink ? <a href={canonicalLink} target="_blank" rel="noreferrer">{canonicalLink}</a> : "求人リンクを準備しています"}</output></div>
     <div className="compact-editor-field"><label htmlFor="center-display-name">センター名</label><input id="center-display-name" value={centerDisplayNameDraft} maxLength={CENTER_DISPLAY_NAME_MAX_LENGTH} onChange={(event) => setCenterDisplayNameDraft(event.target.value)} /></div>

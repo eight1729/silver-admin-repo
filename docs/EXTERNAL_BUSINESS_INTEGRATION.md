@@ -1,5 +1,7 @@
 # External Business Integration Requirements — Slice 1.1
 
+> Current notification behavior and upgrade gates: [NOTIFICATION_ENHANCEMENTS.md](NOTIFICATION_ENHANCEMENTS.md). This supersedes older notification execution/count semantics below.
+
 ## Canonical boundary
 
 Admin の `backend/app/domain/ports/external_business.py` にある

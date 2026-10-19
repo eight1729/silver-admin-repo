@@ -72,6 +72,7 @@ admin_notification_audit_events = Table(
 admin_notification_outbox = Table(
     "admin_notification_outbox", metadata,
     Column("outbox_id", Text, primary_key=True),
+    Column("linkage_version", Text, nullable=True),
     Column("command_id", Text, nullable=False, unique=True),
     Column("operation_id", Text, ForeignKey("admin_notification_operations.operation_id", ondelete="CASCADE"), nullable=False),
     Column("target_id", Text, nullable=False),

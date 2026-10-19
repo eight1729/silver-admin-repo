@@ -7,6 +7,7 @@ export interface ValidationInput {
   notificationLink: string | null;
   operationId: string | null;
   centerDisplayName: string;
+  inputVersion?: number;
 }
 
 export interface ValidationSnapshot extends ValidationInput {}
@@ -22,6 +23,7 @@ export function createValidationSnapshot(input: ValidationInput): ValidationSnap
     notificationLink: input.notificationLink,
     operationId: input.operationId,
     centerDisplayName: input.centerDisplayName,
+    inputVersion: input.inputVersion,
   };
 }
 
@@ -29,6 +31,7 @@ export function isValidationSnapshotCurrent(snapshot: ValidationSnapshot | null,
   if (!snapshot) return false;
   const current = createValidationSnapshot(input);
   return snapshot.jobId === current.jobId
+    && snapshot.inputVersion === current.inputVersion
     && snapshot.operationId === current.operationId
     && snapshot.notificationLink === current.notificationLink
     && snapshot.centerDisplayName === current.centerDisplayName
@@ -66,11 +69,13 @@ export function deriveNotificationUiState(args: {
   liveLinkReady: boolean;
   hasTerminalDelivery: boolean;
   queueFailure: boolean;
+  targetsSaved?: boolean;
 }) {
   const terminal = isTerminalOperation(args.operation) || args.hasTerminalDelivery;
-  const canSaveDraft = args.hasJob && args.messageValid && Boolean(args.operation) && !args.busy && !terminal;
+  const canSaveDraft = args.hasJob && args.messageValid && Boolean(args.operation && !args.operation.send_requested_at && ["draft", "ready", "blocked_external_system"].includes(args.operation.status)) && !args.busy && !terminal;
   const withinLimit = args.maxRecipients == null || args.selectedCount <= args.maxRecipients;
-  const canValidate = args.hasJob && args.selectedCount > 0 && withinLimit && args.messageValid && Boolean(args.operation) && !args.busy && !terminal && args.liveLinkReady;
+  const editable = Boolean(args.operation && !args.operation.send_requested_at && ["draft", "ready", "blocked_external_system"].includes(args.operation.status));
+  const canValidate = args.hasJob && args.selectedCount > 0 && withinLimit && args.messageValid && editable && args.targetsSaved !== false && !args.busy && !terminal && args.liveLinkReady;
   const canSend = canValidate
     && args.action === "idle"
     && args.operation?.status === "ready"

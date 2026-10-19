@@ -26,6 +26,8 @@ def create_admin_notification_tables(connection: Connection) -> tuple[str, ...]:
     for table in ADMIN_NOTIFICATION_TABLES:
         table.create(connection, checkfirst=True)
     migrate_admin_outbox_recovery(connection)
+    from app.db.admin_linkage_version_migration import migrate_admin_linkage_version
+    migrate_admin_linkage_version(connection)
     return tuple(table.name for table in ADMIN_NOTIFICATION_TABLES)
 
 

@@ -24,6 +24,8 @@ import { AdminPanel } from "./AdminPanel";
 import { AdminShell } from "./AdminShell";
 import { CandidateFilterMenu, CandidateSelectionPanel, JobSelectionPanel, MessageEditorPanel, MessageReadOnlySummary, SendConfirmationPanel, SendPreparationState } from "./MajorPanels";
 import type { CandidateFilterId } from "./candidate-filters";
+import { finalNotificationText } from "./notification-text";
+import { validationMatchesSaved } from "./admin-workflow";
 import { createValidationSnapshot, deriveNotificationUiState, isValidationSnapshotCurrent, memberSelectionsEqual, messagesEqual, type ValidationInput, type ValidationSnapshot, type WorkflowAction } from "./notification-ui-state";
 import { CENTER_DISPLAY_NAME_MAX_LENGTH, DEFAULT_CENTER_DISPLAY_NAME, createTemplateMessage, notificationNotice, notificationTemplates, replaceExactCenterName, replaceExactNotice, type NotificationTemplateJob, type SelectedTemplateId } from "./notification-templates";
 import { DeliverySummaryPanel, RecentOperationHistory } from "./LowerPanels";
@@ -93,6 +95,8 @@ function ManualAdminPage({ initialJobId, resumeOperationId }: { initialJobId: st
   const historySequence = useRef(0);
   const deliveryRefresh = useRef<ReturnType<typeof createDeliveryRefresh> | null>(null);
 
+  const inputVersion = useRef(0);
+  const previousInput = useRef("");
   const validationInput = useMemo<ValidationInput>(() => ({
     jobId: selectedJobId,
     selectedMemberIds: [...selected],
@@ -101,15 +105,21 @@ function ManualAdminPage({ initialJobId, resumeOperationId }: { initialJobId: st
     operationId: operation?.operation_id ?? null,
     centerDisplayName,
   }), [centerDisplayName, job, lineSendMode, message, notificationLink, operation, selected, selectedJobId]);
-  const validationInputRef = useRef(validationInput);
-  validationInputRef.current = validationInput;
-  const validationCurrent = isValidationSnapshotCurrent(validationSnapshot, validationInput);
+  const inputIdentity = JSON.stringify(createValidationSnapshot(validationInput));
+  if (previousInput.current !== inputIdentity) { previousInput.current = inputIdentity; inputVersion.current++; }
+  const versionedInput = { ...validationInput, inputVersion: inputVersion.current };
+  const validationInputRef = useRef(versionedInput);
+  validationInputRef.current = versionedInput;
+  const validationCurrent = isValidationSnapshotCurrent(validationSnapshot, versionedInput);
   const currentDeliveries = operation && deliveriesOperationId === operation.operation_id ? deliveries : null;
   const hasTerminalDelivery = Boolean(currentDeliveries?.items.length && currentDeliveries.items.every((item) => item.status === "sent" || item.status === "failed" || item.status === "unknown" || item.status === "skipped"));
+  const targetsSaved = Boolean(operation && !targetsPending && memberSelectionsEqual(selected, operation.selected_member_ids ?? []));
+  const finalText = finalNotificationText(message, notificationLink, lineSendMode);
   const workflowState = deriveNotificationUiState({
+    targetsSaved,
     hasJob: Boolean(job), selectedCount: selected.size,
     maxRecipients: lineSendMode?.max_recipients ?? null,
-    messageValid: Object.values(message).every((value) => value.trim()),
+    messageValid: Object.values(message).every((value) => value.trim()) && finalText !== null && finalText.length <= 5000,
     operation, validation, validationCurrent,
     validationWasInvalidated: validationInvalidation !== null,
     busy, action: workflowAction,
@@ -417,6 +427,8 @@ function ManualAdminPage({ initialJobId, resumeOperationId }: { initialJobId: st
   async function beginOperation() {
     if (!job || selected.size === 0 || busy || (lineSendMode?.max_recipients != null && selected.size > lineSendMode.max_recipients)) return;
     setBusy(true); clearFeedback();
+    const startedSelection = createValidationSnapshot(validationInputRef.current);
+    setTargetsPending(true); setValidation(null); setValidationSnapshot(null);
     let savedOperation = operation;
     try {
       const current = await createOrSaveTargets({
@@ -425,18 +437,23 @@ function ManualAdminPage({ initialJobId, resumeOperationId }: { initialJobId: st
         selectedMemberIds: [...selected], create: (body) => track("通知を作成中…", () => adminApi.createOperation(body)),
         saveTargets: (id, ids) => track("対象会員を保存中…", () => adminApi.updateTargets(id, ids)), reload: (id) => track("通知の状態を取得中…", () => adminApi.operation(id)),
         onCreated: (created) => {
+          if (validationInputRef.current.jobId !== startedSelection.jobId
+              || validationInputRef.current.operationId !== startedSelection.operationId) return;
           savedOperation = created;
           setOperation(created); setNotificationType(created.notification_type); setTargetsPending(true);
           sessionStorage.setItem(STORAGE_KEY, created.operation_id);
           sessionStorage.setItem(SELECTED_KEY, JSON.stringify([...selected]));
         },
       });
-      setOperation(current); setNotificationType(current.notification_type); setTargetsPending(false); setValidation(null);
+      if (validationInputRef.current.jobId !== startedSelection.jobId
+          || ![startedSelection.operationId, savedOperation?.operation_id].includes(validationInputRef.current.operationId)
+          || !memberSelectionsEqual(validationInputRef.current.selectedMemberIds, startedSelection.selectedMemberIds)) return;
+      setOperation(current); setValidationSnapshot(null); setNotificationType(current.notification_type); setTargetsPending(false); setValidation(null);
       sessionStorage.setItem(SELECTED_KEY, JSON.stringify([...selected]));
       setSuccess("対象者を保存しました。"); setStep("edit");
     } catch (e) {
       showError(e);
-      if (savedOperation) {
+      if (savedOperation && validationInputRef.current.jobId === startedSelection.jobId) {
         setTargetsPending(true);
         setSuccess("通知操作は作成済みです。対象者の保存を再試行してください。");
       }
@@ -446,44 +463,55 @@ function ManualAdminPage({ initialJobId, resumeOperationId }: { initialJobId: st
 
   async function saveMessage() {
     if (!operation || !workflowState.canSaveDraft || workflowLock.current) return;
+    const savedInput = createValidationSnapshot(validationInputRef.current);
+    setValidation(null); setValidationSnapshot(null);
     workflowLock.current = true; setWorkflowAction("saving"); setBusy(true); clearFeedback();
-    try { const current = await track("通知文を保存中…", () => adminApi.updateOperation(operation.operation_id, message)); setOperation(current); setValidation(null); recordSessionEvent(current.operation_id, "下書き保存", "保存済み", "現在の通知本文を保存しました。"); setSuccess("通知文を保存しました。"); }
+    try { const current = await track("通知文を保存中…", () => adminApi.updateOperation(operation.operation_id, message)); if (!isValidationSnapshotCurrent(savedInput, validationInputRef.current)) return; setOperation(current); setValidation(null); setValidationSnapshot(null); recordSessionEvent(current.operation_id, "下書き保存", "保存済み", "現在の通知本文を保存しました。"); setSuccess("通知文を保存しました。"); }
     catch (e) { showError(e); }
     finally { workflowLock.current = false; setWorkflowAction("idle"); setBusy(false); }
   }
 
   async function validate() {
-    if (!operation || !workflowState.canValidate || workflowLock.current) return;
+    if (!operation || !targetsSaved || !workflowState.canValidate || workflowLock.current) return;
     const startedSnapshot = createValidationSnapshot(validationInputRef.current);
     workflowLock.current = true; setWorkflowAction("validating"); setBusy(true); clearFeedback();
     setValidation(null); setValidationSnapshot(null); setValidationInvalidation(null);
     try {
       const result = await saveThenValidate({ operationId: operation.operation_id, message, save: (id, body) => track("通知文を保存中…", () => adminApi.updateOperation(id, body)), validate: (id) => track("送信前の検証中…", () => adminApi.validate(id)) });
       const currentOperation = await track("通知の状態を取得中…", () => adminApi.operation(operation.operation_id));
-      setOperation(currentOperation); setValidation(result.validation);
-      if (isValidationSnapshotCurrent(startedSnapshot, validationInputRef.current)) {
-        setMessage(result.operation.message); setValidationSnapshot(startedSnapshot); setValidationInvalidation(null); setStep("confirm");
+      if (validationInputRef.current.operationId !== startedSnapshot.operationId) return;
+      if (isValidationSnapshotCurrent(startedSnapshot, validationInputRef.current)
+          && validationMatchesSaved(currentOperation, result.validation, startedSnapshot.selectedMemberIds)
+          && messagesEqual(currentOperation.message, startedSnapshot.message)) {
+        setOperation(currentOperation); setValidation(result.validation); setValidationSnapshot(startedSnapshot); setValidationInvalidation(null); setStep("confirm");
       } else {
         setValidationSnapshot(null); setValidationInvalidation("検証中に内容が変更されたため、再検証が必要です。");
         recordSessionEvent(operation.operation_id, "事前検証", "検証失効", "検証中に内容が変更されたため、結果を送信許可として使用しません。");
       }
     }
-    catch (e) { setValidation(null); setValidationSnapshot(null); setValidationInvalidation(null); recordSessionEvent(operation.operation_id, "事前検証", "完了せず", "事前検証を完了できませんでした。"); showError(e); setOperation(await track("通知の状態を取得中…", () => adminApi.operation(operation.operation_id)).catch(() => operation)); }
+    catch (e) {
+      if (validationInputRef.current.operationId !== startedSnapshot.operationId) return;
+      setValidation(null); setValidationSnapshot(null); setValidationInvalidation(null); showError(e);
+      const latest = await track("通知の状態を取得中…", () => adminApi.operation(operation.operation_id)).catch(() => null);
+      if (latest && validationInputRef.current.operationId === startedSnapshot.operationId) setOperation(latest);
+    }
     finally { workflowLock.current = false; setWorkflowAction("idle"); setBusy(false); }
   }
 
   async function fakeSend() {
-    if (!operation || !workflowState.canSend || workflowLock.current) return;
+    if (!operation || !targetsSaved || !workflowState.canSend || workflowLock.current) return;
     workflowLock.current = true; setWorkflowAction("sending"); setBusy(true); clearFeedback();
     setQueueFailure(false); setDeliveriesError("");
     try {
       const result = await sendThenLoadDeliveries({
         operationId: operation.operation_id, send: (id) => track("通知を送信中…", () => adminApi.send(id, validation?.confirmation_token ?? undefined)), loadDeliveries: (id) => track("送信結果を取得中…", () => adminApi.deliveries(id)),
-        onSent: (sent) => { setOperation(sent); setStep("result"); setDeliveriesLoading(true); },
+        onSent: (sent) => { if (validationInputRef.current.operationId !== operation.operation_id) return; setOperation(sent); setStep("result"); setDeliveriesLoading(true); },
       });
       if (validationInputRef.current.operationId === operation.operation_id) { setDeliveries(result.deliveries); setDeliveriesOperationId(result.deliveries ? operation.operation_id : null); }
+      if (validationInputRef.current.operationId !== operation.operation_id) return;
       if (result.deliveryError) setDeliveriesError("配信結果を取得できませんでした。配信結果だけを再読み込みしてください。");
     } catch (e) {
+      if (validationInputRef.current.operationId !== operation.operation_id) return;
       if (e instanceof AdminApiError && e.status === 503 && e.code === "service_unavailable") {
         setQueueFailure(true); setError("送信処理は開始されませんでした。現在の状態を確認してください。自動再送は行いません。");
       } else showError(e);
@@ -516,7 +544,8 @@ function ManualAdminPage({ initialJobId, resumeOperationId }: { initialJobId: st
     </AdminPanel>
     <AdminPanel number={2} title="対象候補会員" badge={job ? `${job.title}・${candidates.length}人` : undefined} actions={job ? <CandidateFilterMenu value={candidateFilter} onChange={setCandidateFilter} /> : undefined}>
       {!selectedJobId ? <p className="admin-panel-empty">求人を選択すると、通知候補会員を読み込みます。</p> : !job ? <div className={detailError ? "admin-error" : "admin-info"} role={detailError ? "alert" : "status"}>{detailError ? <><p>選択求人の詳細を取得できませんでした。</p><button className="admin-button secondary" disabled={busy} onClick={() => void retryDetail()}>求人詳細を再読み込み</button></> : "選択求人を読み込んでいます。"}</div> : <CandidateSelectionPanel job={job} candidates={candidates} selected={selected} notificationType={operation?.notification_type ?? notificationType} notificationTypeLocked={operation !== null} setNotificationType={changeNotificationType} toggle={toggle} begin={beginOperation} busy={busy} error={candidatesError} retry={retryCandidates} targetsPending={targetsPending} maxRecipients={lineSendMode?.max_recipients ?? null} editable={step === "detail" && !workflowState.terminal} filter={candidateFilter} setFilter={setCandidateFilter} />}
-      {job && operation && <div className="candidate-edit-actions"><button className="admin-button secondary" disabled={busy || workflowAction === "sending" || workflowState.terminal || !["draft", "ready"].includes(operation.status) || Boolean(operation.send_requested_at)} onClick={() => { setValidationSnapshot(null); setValidationInvalidation("対象会員の編集後は再検証してください。"); setStep("detail"); }}>対象会員編集</button></div>}
+      {operation && !targetsSaved && <p className="admin-info" role="status">対象会員が未保存です。対象を保存してから検証してください。</p>}
+      {job && operation && <div className="candidate-edit-actions"><button className="admin-button secondary" disabled={busy || workflowAction === "sending" || workflowState.terminal || !["draft", "ready", "blocked_external_system"].includes(operation.status) || Boolean(operation.send_requested_at)} onClick={() => { setValidationSnapshot(null); setValidationInvalidation("対象会員の編集後は再検証してください。"); setStep("detail"); }}>対象会員編集</button></div>}
     </AdminPanel>
     </div>
     <AdminPanel number={3} title="通知文編集" badge={job?.title} status={workflowState.state === "stale" ? "再検証が必要" : step === "edit" ? "現在の操作" : operation ? "下書きあり" : "未準備"}>

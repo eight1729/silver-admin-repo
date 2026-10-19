@@ -131,6 +131,7 @@ class AdminSendRequest(BaseModel):
 
 
 class AdminValidationResponse(BaseModel):
+    validated_at: datetime | None = None
     confirmation_token: str | None = None
     target_results: tuple[AdminValidationTargetResponse, ...] = ()
     requires_staff_reconfirmation: bool = False

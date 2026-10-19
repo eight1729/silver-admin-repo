@@ -3,7 +3,7 @@
     "schemas": {
       "BusinessNotificationMessage": {
         "additionalProperties": false,
-        "description": "Admin-owned editable business message, not a LINE provider payload.",
+        "description": "Admin-owned editable sections. Final text (separators, canonical URL and local prefix included) must not exceed 5000 UTF-16 code units; oversize commands resolve as failed/message_too_long before a new provider call. Existing ambiguous attempts remain uncertain.",
         "properties": {
           "greeting": {
             "minLength": 1,
@@ -146,6 +146,17 @@
           "line_linked": {
             "title": "Line Linked",
             "type": "boolean"
+          },
+          "linkage_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkage Version"
           }
         },
         "required": [
@@ -157,7 +168,6 @@
       },
       "NotificationCommand": {
         "additionalProperties": false,
-        "description": "One immutable delivery request for exactly one external member.",
         "properties": {
           "business_message": {
             "$ref": "#/components/schemas/BusinessNotificationMessage"
@@ -197,6 +207,12 @@
             "title": "Job Version",
             "type": "string"
           },
+          "linkage_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Linkage Version",
+            "type": "string"
+          },
           "message_hash": {
             "description": "Lowercase SHA-256 hex digest of the canonical business message.",
             "maxLength": 64,
@@ -231,6 +247,7 @@
           }
         },
         "required": [
+          "linkage_version",
           "command_id",
           "operation_id",
           "target_id",
@@ -590,7 +607,7 @@
   "info": {
     "description": "Versioned contract owned by the LINE API provider. This Phase 1 application describes interfaces only.",
     "title": "Silver LINE Internal API Contract",
-    "version": "1.2.0"
+    "version": "2.0.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -871,6 +888,48 @@
         ]
       }
     },
+    "/internal/v1/rich-menus:reconcile": {
+      "post": {
+        "operationId": "reconcile_rich_menus_internal_v1_rich_menus_reconcile_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Reconcile Rich Menus Internal V1 Rich Menus Reconcile Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": {
+                    "error": "scope_forbidden"
+                  }
+                }
+              }
+            },
+            "description": "Authenticated caller is not allowed to access the business scope"
+          }
+        },
+        "security": [
+          {
+            "LineInternalBearer": []
+          }
+        ],
+        "summary": "Reconcile Rich Menus",
+        "tags": [
+          "rich-menu"
+        ]
+      }
+    },
     "/internal/v1/send-capability:check": {
       "post": {
         "operationId": "check_send_capability_internal_v1_send_capability_check_post",
@@ -990,6 +1049,6 @@
     }
   },
   "x-contract-owner": "LINE Repository",
-  "x-contract-version": "1.2.0",
+  "x-contract-version": "2.0.0",
   "x-phase": "phase-1-contract-only"
 }

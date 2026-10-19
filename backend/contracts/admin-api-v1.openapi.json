@@ -944,6 +944,18 @@
             "title": "Target Results",
             "type": "array"
           },
+          "validated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated At"
+          },
           "version_changed": {
             "title": "Version Changed",
             "type": "boolean"
