@@ -146,7 +146,7 @@ async def test_failure_is_not_business_mismatch_and_is_sanitized(context, caplog
 async def test_summary_is_minimal_and_uses_configured_scope(context):
     response = await post(context, "members:summary", {"service_id": "service-b", "external_member_id": "stable-member"})
     assert response.status_code == 200
-    assert response.json() == {"external_member_id": "stable-member", "display_label": "Display"}
+    assert response.json() == {"external_member_id": "stable-member", "display_label": "Display", "member_number": None}
     assert context[1].member_calls == [("organization-b", "stable-member")]
 
 
@@ -210,7 +210,7 @@ async def test_summary_does_not_serialize_additional_provider_identity(context):
     context[1].get_member_summary = broad_summary
     response = await post(context, "members:summary", {"service_id": "service-a", "external_member_id": "stable-member"})
     assert response.status_code == 200
-    assert response.json() == {"external_member_id": "stable-member", "display_label": "Display"}
+    assert response.json() == {"external_member_id": "stable-member", "display_label": "Display", "member_number": "0007"}
 
 
 async def test_invalid_job_response_is_sanitized_dependency_error(context):
@@ -230,7 +230,7 @@ def test_openapi_matches_runtime_and_contains_no_line_identity(context):
     assert artifact["paths"] == runtime["paths"]
     assert artifact["components"] == runtime["components"]
     assert "line_subject" not in serialize()
-    assert artifact["info"]["version"] == "1.0.0"
+    assert artifact["info"]["version"] == "1.1.0"
     assert artifact["x-contract-owner"] == "admin"
     for path in artifact["paths"].values():
         assert path["post"]["security"] == [{"LineToAdminBearer": []}]

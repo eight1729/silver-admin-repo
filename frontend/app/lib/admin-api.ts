@@ -10,7 +10,7 @@ export interface AdminJobDetail { created_at?: string | null; job_id: string; ti
 export interface AdminCandidate { linkage_unknown?: boolean; recommendation_level?: number | null; member_id: string; member_number?: string | null; display_name: string; line_linked: boolean; eligible: boolean; reason: string | null; selected: boolean; preference_summary?: string | null }
 export interface AdminMessage { greeting: string; introduction: string; note: string }
 export interface AdminOperation { automatic_selection?: boolean; selected_member_ids?: string[]; operation_id: string; job_id: string; job_version: string | null; notification_type: NotificationType; message: AdminMessage; status: OperationStatus; target_count: number; selected_count: number; validated_at: string | null; send_requested_at: string | null; completed_at: string | null; created_at: string; updated_at: string }
-export interface AdminValidation { confirmation_token?: string | null; target_results?: AdminValidationTarget[]; requires_staff_reconfirmation?: boolean; operation_id: string; status: OperationStatus; can_proceed: boolean; selected_count: number; sendable_count: number; skipped_count: number; reasons: string[]; version_changed: boolean; external_system_blocked: boolean }
+export interface AdminValidation { validated_at?: string | null; confirmation_token?: string | null; target_results?: AdminValidationTarget[]; requires_staff_reconfirmation?: boolean; operation_id: string; status: OperationStatus; can_proceed: boolean; selected_count: number; sendable_count: number; skipped_count: number; reasons: string[]; version_changed: boolean; external_system_blocked: boolean }
 export interface AdminDelivery { delivery_id: string; member_id: string; status: DeliveryStatus; reason_code: string | null; created_at: string; sent_at: string | null; updated_at: string }
 export interface AdminDeliveries { items: AdminDelivery[]; summary: Record<DeliveryStatus, number> }
 export interface AdminLineSendMode { mode: "disabled" | "staging_live" | "production_live" | "unavailable"; max_recipients: number | null; message_prefix: string | null; live_send_enabled?: boolean | null; ready?: boolean | null; blocking_reasons?: string[] }
@@ -83,6 +83,7 @@ export const adminApi = {
 
 export function adminErrorMessage(error: unknown): string {
   if (!(error instanceof AdminApiError)) return "処理に失敗しました。もう一度お試しください。";
+  if (error.code === "message_too_long") return "リンクと付加文言を含む完成文は5,000 UTF-16単位以内にしてください。本文を編集して再保存できます。";
   if (error.code === "api_not_configured") return "Backend URLが設定されていません。ローカル環境の設定を確認してください。";
   if (error.code === "external_system_unavailable") return "求人・候補情報を確認できませんでした。しばらくして再確認してください。";
   if (error.code === "external_target_limit_exceeded") return "外部業務APIで確認できる対象は最大500人です。選択人数を500人以下に減らして再検証してください。送信可能人数は別の制限に従います。";

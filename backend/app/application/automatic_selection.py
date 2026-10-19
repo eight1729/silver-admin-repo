@@ -6,7 +6,12 @@ from collections.abc import Mapping
 
 
 def automatic_context(operation):
-    return (operation.validation_snapshot or {}).get("automatic_selection")
+    context = (operation.validation_snapshot or {}).get("automatic_selection")
+    if context is None:
+        return None
+    # Re-evaluate only known transient dependency verdicts; preserve staff intent.
+    return {**context, "excluded": {key: value for key, value in context["excluded"].items()
+        if value.get("reason") not in {"external_timeout", "external_rate_limited", "external_invalid_response"}}}
 
 
 def context_snapshot(operation):

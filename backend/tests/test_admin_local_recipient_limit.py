@@ -40,8 +40,14 @@ async def test_selected_limit_before_delivery_outbox_and_dispatch(db, environmen
         service_id="svc", organization_id="org-fake-silver-001", runner_service_ids=("svc",))
     service = application.notification_service
     service._clock = lambda: NOW
+    async def preferences(service_id, ids): return {m: "not_linked" if m in members[:skip] else "enabled" for m in ids}
+    service._recipient_status_lookup = preferences
     cap = Client(capability("staging_live" if environment == "local" else "production_live", ready, cap_limit))
     service._reservation_guard.client = cap
+    from types import SimpleNamespace
+    async def message_capability(request): return cap.value
+    async def message_link(request): return SimpleNamespace(canonical_deep_link="https://liff.line.me/offline")
+    boundary.client = SimpleNamespace(check_send_capability=message_capability, resolve_deep_link=message_link)
     dispatched = []
     async def capture(**kwargs):
         dispatched.append(kwargs)
@@ -51,7 +57,12 @@ async def test_selected_limit_before_delivery_outbox_and_dispatch(db, environmen
         greeting="hello", introduction="job", note="note", created_by_staff_id="staff"))
     await service.replace_targets(ReplaceNotificationTargetsCommand("svc", operation.operation_id,
         tuple(NotificationTargetInput(m, True, i >= skip, None, None) for i, m in enumerate(members))))
-    command = SendNotificationOperationCommand("svc", operation.operation_id, "staff", "offline-request")
+    from app.application.notification_service import ValidateNotificationOperationCommand
+    from app.application.automatic_selection import confirmation_identity
+    await service.validate_operation(ValidateNotificationOperationCommand("svc", operation.operation_id, "staff", "validate"))
+    confirmed = await boundary.repository.get_operation("svc", operation.operation_id)
+    targets = await boundary.repository.get_targets("svc", operation.operation_id)
+    command = SendNotificationOperationCommand("svc", operation.operation_id, "staff", "offline-request", confirmation_identity(confirmed, targets))
     repo = boundary.repository
     if allowed:
         await service.send_operation(command)

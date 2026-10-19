@@ -58,11 +58,16 @@ async def world(db, count=3, environment="production"):
     application, boundary, _ = build_production_admin_application(runtime_settings=complete_settings(app_env=environment),
         engine=db, client=object(), external_business_gateway=external, queue_gateway=LocalInlineNotificationQueue(),
         service_id="svc", organization_id="org-fake-silver-001", runner_service_ids=("svc",))
+    from app.contracts.admin_line_internal_v1 import LiffDeepLinkResponse
+    boundary.client.check_send_capability = Client(capability()).check_send_capability
+    async def resolve_link(request):
+        return LiffDeepLinkResponse(canonical_deep_link="https://liff.line.me/offline/jobs/JOB-001")
+    boundary.client.resolve_deep_link = resolve_link
     calls = []
     async def lookup(request):
         calls.append(tuple(request.external_member_ids))
         return {"items": [{"external_member_id": m, "line_linked": linked[m],
-                           "job_notification_status": "enabled" if linked[m] else "unknown"} for m in request.external_member_ids]}
+                           "linkage_version": "offline-generation" if linked[m] else None, "job_notification_status": "enabled" if linked[m] else "unknown"} for m in request.external_member_ids]}
     application._line_internal_client = SimpleNamespace(batch_get_linkages=lookup)
     application.notification_service._reservation_guard.client = Client(capability())
     dispatched = []
@@ -260,7 +265,7 @@ async def test_scope_auth_and_selected_only_confirmation_api(db):
         assert "m-0" not in {t["member_id"] for t in response.json()["targets"]}
         result = await client.post(f"/admin/notification-operations/{op}/validate")
         assert result.status_code == 200 and len(result.json()["target_results"]) == 100
-        assert result.json()["skipped_count"] == 1  # Legacy count includes the unselected candidate.
+        assert result.json()["skipped_count"] == 0  # Unselected candidates are not deliveries.
         assert (await client.post(f"/admin/notification-operations/{op}/send")).status_code == 409
         staff.service_id = "other"
         assert (await client.get(f"/admin/notification-operations/{op}/confirmation")).status_code == 404

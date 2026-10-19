@@ -50,6 +50,17 @@ class AdminLineOutboxDispatcher:
             service_id, operation_id
         )
         for item in claimed:
+            if not item.linkage_version:
+                # Historical intent is not proof of non-delivery. Retain it for
+                # command-ID reconciliation; never assign today's linkage.
+                try:
+                    result = await self._line_client.get_notification_result(item.command_id)
+                    validate_notification_result_identity(result, item)
+                except Exception:
+                    continue
+                await self._repository.update_outbox_state(service_id, operation_id, item.outbox_id,
+                    NotificationOutboxState.ACCEPTED, claim_token=item.claim_token)
+                continue
             try:
                 result = await asyncio.wait_for(self._line_client.submit_notification_command(
                     self._command(item)
@@ -72,6 +83,7 @@ class AdminLineOutboxDispatcher:
     @staticmethod
     def _command(item) -> NotificationCommand:
         return NotificationCommand(
+            linkage_version=item.linkage_version,
             command_id=item.command_id,
             operation_id=item.operation_id,
             target_id=item.target_id,

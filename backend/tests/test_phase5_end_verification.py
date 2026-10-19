@@ -54,9 +54,11 @@ def test_runner_ownership_is_required_separately_from_scope_mapping():
 
 
 @pytest.mark.asyncio
-async def test_cross_repo_stale_admin_to_recovered_line_terminal(db):
-    """Exchange only v1 JSON; isolate the two repositories' app packages."""
+@pytest.mark.parametrize("scenario", ["crash", "optout_race"])
+async def test_cross_repo_stale_admin_to_recovered_line_terminal(db, scenario):
+    """Exchange only the current strict contract JSON; isolate the two repositories' app packages."""
     import subprocess
+    import json
     import sys
     from pathlib import Path
     from datetime import timedelta
@@ -69,7 +71,8 @@ async def test_cross_repo_stale_admin_to_recovered_line_terminal(db):
     if not line_backend.is_dir():
         pytest.skip("cross-repository verification requires the sibling LINE checkout")
     script = r'''
-import os, sys, asyncio
+import os, sys, asyncio, json
+from datetime import timedelta
 os.environ['DATABASE_URL']='postgresql://unused/unused'
 os.environ['APP_ENV']='local'
 from pydantic_settings import DotEnvSettingsSource
@@ -77,7 +80,7 @@ DotEnvSettingsSource._read_env_files=lambda self: {}
 sys.path.insert(0, 'tests')
 import httpx
 from pydantic import SecretStr
-from test_line_command_recovery_snapshot import Database, Provider, runtime
+from test_line_command_recovery_snapshot import Database, Provider, runtime, NOW
 from app.schemas.line_internal_contract import NotificationCommand
 from app.adapter.line_messaging_credentials import SettingsLineMessagingCredentialResolver
 from app.adapter.canonical_deep_link import SettingsCanonicalDeepLinkResolver
@@ -91,60 +94,98 @@ async def main():
     db=Database()
     provider=Provider()
     async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as client:
-        commands, deliveries, pipeline=runtime(db,client)
+        current=[NOW]
+        commands, deliveries, pipeline=runtime(db,client,clock=lambda:current[0])
+        from app.adapter.admin_business_scope import SettingsAdminBusinessScopeResolver
+        scopes=SettingsAdminBusinessScopeResolver({command.scope.service_id:command.scope.organization_id})
+        commands._scopes=scopes
         await commands.accept_command(command)
         # Replay of the same Admin intent must not allocate another command.
         await commands.accept_command(command)
         store=SqlAlchemyLineRecipientStore(db)
-        await store.save(LinkedRecipient(command.scope.organization_id,command.scope.service_id,
+        linkage=await store.save(LinkedRecipient(command.scope.organization_id,command.scope.service_id,
                                         command.external_member_id,'offline-subject'))
+        await store.update_preferences(linkage, job_notifications_enabled=True, center_notifications_enabled=False)
+        from sqlalchemy import insert
+        from app.db.tables import line_recipient_states
+        await db.execute(insert(line_recipient_states).values(organization_id=command.scope.organization_id,
+            service_id=command.scope.service_id, line_subject='offline-subject',
+            external_member_id=command.external_member_id, version=command.linkage_version))
         def configure(pipeline, base):
+            pipeline._commands._scopes=scopes
             pipeline._recipients=LineRecipientService(store)
             pipeline._sender._credential_resolver=SettingsLineMessagingCredentialResolver({
                 command.scope.organization_id:{command.scope.service_id:SecretStr('offline-token')}})
             pipeline._deep_links=SettingsCanonicalDeepLinkResolver({
                 command.scope.organization_id:{command.scope.service_id:'https://liff.line.me/'+base}})
         configure(pipeline,'before')
-        async def crash(*args,**kwargs): raise RuntimeError('after provider acceptance')
-        deliveries.mark_sent=crash
-        try: await pipeline.process_command(command.command_id)
-        except RuntimeError: pass
-        commands, deliveries, restarted=runtime(db,client)
-        configure(restarted,'after')
-        await LineCommandRecoveryRunner(commands=commands,pipeline=restarted).run_cycle()
+        pending=None
+        if sys.argv[1]=='crash':
+            async def crash(*args,**kwargs): raise RuntimeError('after provider acceptance')
+            deliveries.mark_sent=crash
+            try: await pipeline.process_command(command.command_id)
+            except RuntimeError: pass
+            current[0]+=timedelta(seconds=31)
+            commands, deliveries, restarted=runtime(db,client,clock=lambda:current[0])
+            configure(restarted,'after')
+            await LineCommandRecoveryRunner(commands=commands,pipeline=restarted).run_cycle()
+        else:
+            provider.block=asyncio.Event()
+            task=asyncio.create_task(pipeline.process_command(command.command_id))
+            while not provider.requests: await asyncio.sleep(0)
+            await store.update_preferences(linkage,job_notifications_enabled=False,center_notifications_enabled=False)
+            _, _, competitor=runtime(db,client,clock=lambda:current[0])
+            configure(competitor,'after')
+            pending=await competitor.process_command(command.command_id)
+            assert pending.status.value=='pending'
+            provider.block.set()
+            await task
         result=await LineNotificationResultService(commands=commands,deliveries=deliveries).get_result(command.command_id)
         assert result.status.value=='sent'
-        assert len(provider.accepted)==1 and len(provider.requests)==2
-        assert provider.requests[0]==provider.requests[1]
+        assert len(provider.accepted)==1 and len(provider.requests)==1
         assert await commands.list_recoverable_commands(50)==()
-        print(result.model_dump_json())
+        print(json.dumps(dict(pending=pending.model_dump(mode='json') if pending else None,final=result.model_dump(mode='json'))))
     db.connection.close()
     db.engine.dispose()
 asyncio.run(main())
 '''
     repo, now, op, items = await seed(db)
+    from sqlalchemy import update
+    from app.db.admin_tables import admin_notification_outbox
+    await db.execute(update(admin_notification_outbox).values(linkage_version="offline-cross-repo-version"))
     await repo.claim_outbox_records("svc", op.operation_id)
     now[0] += timedelta(seconds=60)
     class Client:
         polls = 0
+        child_error = None
         async def submit_notification_command(self, command):
             assert command.command_id == items[0].command_id
-            completed = subprocess.run([sys.executable, "-B", "-c", script], cwd=line_backend,
+            completed = subprocess.run([sys.executable, "-B", "-c", script, scenario], cwd=line_backend,
                 input=command.model_dump_json(), text=True, capture_output=True, timeout=30)
+            self.child_error = completed.stderr if completed.returncode else None
             assert completed.returncode == 0, completed.stderr
-            self.result = NotificationResult.model_validate_json(completed.stdout)
-            return self.result
+            payload = json.loads(completed.stdout)
+            self.result = NotificationResult.model_validate(payload["final"])
+            self.pending = NotificationResult.model_validate(payload["pending"]) if payload["pending"] else None
+            return self.pending or self.result
         async def get_notification_result(self, command_id):
             self.polls += 1
-            return self.result
+            return self.pending if self.polls == 1 and self.pending else self.result
     client = Client()
     reconciler = AdminLineResultReconciler(repository=repo, line_client=client)
     runner = AdminNotificationRunner(repository=repo, service_ids=["svc"],
         dispatcher=AdminLineOutboxDispatcher(repository=repo, line_client=client), reconciler=reconciler)
     await runner.run_cycle()
+    assert client.child_error is None, client.child_error
+    if scenario == "optout_race":
+        assert (await repo.get_operation("svc", op.operation_id)).status is OperationStatus.SENDING
+        assert (await repo.get_outbox_records("svc", op.operation_id))[0].state is NotificationOutboxState.ACCEPTED
+        now[0] += timedelta(seconds=61)
+        await runner.run_cycle()  # finish cursor page
+        await runner.run_cycle()  # next sweep observes the terminal result
     first = await repo.get_operation("svc", op.operation_id)
     assert first.status is OperationStatus.COMPLETED and first.completed_at is not None
     assert (await repo.get_outbox_records("svc", op.operation_id))[0].state is NotificationOutboxState.RECONCILED
     await reconciler.reconcile_operation(service_id="svc", operation_id=op.operation_id)
     assert (await repo.get_operation("svc", op.operation_id)).completed_at == first.completed_at
-    assert client.polls == 1
+    assert client.polls == (2 if scenario == "optout_race" else 1)

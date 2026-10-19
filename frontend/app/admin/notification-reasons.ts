@@ -1,6 +1,11 @@
 export function notificationReasonLabel(reason: string | null): string {
   if (!reason) return "—";
   return ({
+    invalid_message: "通知本文の形式が不正です",
+    message_too_long: "通知本文が上限を超えています", bad_request: "通知リクエストが不正です",
+    linkage_changed: "会員連携が変更されたため送信を停止しました。",
+  linkage_changed_after_call: "送信開始後に会員連携が変更され、結果を確認できません。",
+  preference_changed_after_call: "送信開始後に受信設定が変更されたため結果不明",
     notification_opted_out: "就業通知の受信拒否（未送信）",
     notification_preferences_unanswered: "通知アンケート未回答（未送信）",
     notification_preferences_unavailable: "受信設定を確認できない（再検証が必要）",

@@ -1,4 +1,13 @@
 import type { AdminCandidate, AdminDeliveries, AdminJobDetail, AdminMessage, AdminOperation, AdminValidation, NotificationType } from "../lib/admin-api";
+import { memberSelectionsEqual } from "./notification-ui-state.ts";
+
+export function validationMatchesSaved(operation: AdminOperation, validation: AdminValidation, ids: string[]): boolean {
+  return operation.operation_id === validation.operation_id
+    && memberSelectionsEqual(ids, operation.selected_member_ids ?? [])
+    && memberSelectionsEqual(ids, (validation.target_results ?? []).map(item => item.member_id))
+    && operation.validated_at !== null && operation.validated_at === validation.validated_at
+    && operation.status === validation.status;
+}
 
 type CreateBody = AdminMessage & { job_id: string; notification_type: NotificationType };
 

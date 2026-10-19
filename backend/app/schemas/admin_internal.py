@@ -7,7 +7,7 @@ from app.domain.enums.enums import JobStatus
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ADMIN_INTERNAL_CONTRACT_VERSION = "1.0.0"
+ADMIN_INTERNAL_CONTRACT_VERSION = "1.1.0"
 
 
 class InternalRequest(BaseModel):
@@ -69,6 +69,7 @@ class InternalErrorResponse(BaseModel):
 class ExternalMemberSummary:
     external_member_id: str
     display_label: str | None
+    member_number: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

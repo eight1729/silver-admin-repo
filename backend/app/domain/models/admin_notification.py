@@ -156,3 +156,4 @@ class NotificationOutboxRecord:
     state: NotificationOutboxState = NotificationOutboxState.PENDING
     lease_expires_at: datetime | None = None
     claim_token: UUID | None = None
+    linkage_version: str | None = None

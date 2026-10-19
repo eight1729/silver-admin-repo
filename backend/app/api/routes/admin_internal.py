@@ -88,7 +88,7 @@ async def member_summary(
     body: MemberRequest, service: AdminInternalService = Depends(get_admin_internal_service),
 ):
     result = await service.get_member_summary(body.service_id, body.external_member_id)
-    return ExternalMemberSummary(result.external_member_id, result.display_label)
+    return ExternalMemberSummary(result.external_member_id, result.display_label, result.member_number)
 
 
 @router.post("/members:recommended-jobs", response_model=list[ExternalJobSummary])

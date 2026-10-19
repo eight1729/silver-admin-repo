@@ -418,7 +418,15 @@ class AdminApplicationService:
     async def get_operation(
         self, service_id: str, operation_id: UUID
     ) -> NotificationOperationResult:
-        return await self.notification_service.get_operation(service_id, operation_id)
+        from app.domain.models.delivery_population import selected_deliveries, projected_operation
+        from dataclasses import replace
+        result = await self.notification_service.get_operation(service_id, operation_id)
+        rows = await self.notification_service._repository.get_deliveries(service_id, operation_id)
+        visible = selected_deliveries(result.operation, result.targets, rows)
+        # This is a coherent read projection only; stored records and audits remain intact.
+        if len(visible) != len(rows):
+            return replace(result, operation=projected_operation(result.operation, visible))
+        return result
 
     async def update_operation(
         self,

@@ -1,4 +1,8 @@
+今回の会員連携版・解除・メニュー同期の反映は [統合反映手順](../../silver-line-repo/docs/MEMBER_LIFECYCLE_ROLLOUT.md) に従ってください。旧新strict契約の混在と、世代なし通知の一律補完は禁止です。
+
 # Silver LINE / Admin Deployment Runbook
+
+> Current notification behavior and upgrade gates: [NOTIFICATION_ENHANCEMENTS.md](NOTIFICATION_ENHANCEMENTS.md). This supersedes older notification execution/count semantics below.
 
 対象: PR待機中ロードマップ Phase 2 / Slice 2.3。全体手順のownerはAdmin repository。
 対象unitはLINE Backend、Admin Backend、LINE / LIFF Frontend、Admin Frontend。

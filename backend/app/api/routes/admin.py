@@ -79,6 +79,9 @@ async def get_line_send_mode(
 
 
 def _translate(exc: Exception) -> None:
+    from app.domain.models.notification_text import MessageTooLongError
+    if isinstance(exc, MessageTooLongError):
+        raise HTTPException(status_code=422, detail={"error": "message_too_long"})
     from app.domain.errors.admin_notification_repository import ReservedNotificationMutationError
     if isinstance(exc, ReservedNotificationMutationError):
         raise HTTPException(status_code=409, detail={"error": "operation_conflict"})
@@ -356,6 +359,7 @@ async def validate_operation(
                      and operation.validated_at == summary.validated_at
                      and set(by_id) == {t.member_id for t in selected})
         return AdminValidationResponse(
+            validated_at=summary.validated_at,
             confirmation_token=confirmation_identity(operation, current.targets) if confirmed else None,
             target_results=tuple(AdminValidationTargetResponse(member_id=t.member_id,
                 disposition=by_id[t.member_id].delivery_disposition.value if t.member_id in by_id else "block",

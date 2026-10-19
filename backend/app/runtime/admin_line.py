@@ -100,8 +100,37 @@ def build_production_admin_application(
     async def lookup_preferences(service_id, member_ids):
         return await application.confirmed_job_notification_statuses(service_id, member_ids)
 
+    async def lookup_snapshot(service_id, member_ids):
+        from app.domain.errors.errors import ExternalSystemUnavailableError
+        from app.application.admin_service import AdminDependencyUnavailableError
+        try:
+            return await application._lookup_linkage_items(scope_resolver.resolve(service_id), member_ids)
+        except AdminDependencyUnavailableError:
+            raise ExternalSystemUnavailableError("LINE linkage unavailable") from None
+
+    async def check_message(service_id, job_id, message):
+        from app.application.admin_send_capability import fetch_send_capability
+        from app.contracts.admin_line_internal_v1 import LiffDeepLinkRequest
+        from app.domain.models.notification_text import final_notification_text, validate_final_text, MessageTooLongError
+        from app.domain.errors.errors import ExternalSystemUnavailableError
+        try:
+            scope = scope_resolver.resolve(service_id)
+            capability = await fetch_send_capability(boundary.client, scope)
+            link = await boundary.client.resolve_deep_link(LiffDeepLinkRequest(scope=scope, job_id=job_id))
+            if capability.mode not in {"staging_live", "production_live"}:
+                raise ValueError("message composition unavailable")
+            prefix = capability.message_prefix if capability.mode == "staging_live" else None
+            if capability.mode == "staging_live" and not prefix:
+                raise ValueError("message prefix unavailable")
+            validate_final_text(final_notification_text(message, str(link.canonical_deep_link), prefix))
+        except MessageTooLongError:
+            raise
+        except Exception:
+            raise ExternalSystemUnavailableError("message composition unavailable") from None
+
     notifications = NotificationService(
         repository=boundary.repository,
+        message_guard=check_message,
         external_business_gateway=external_business_gateway,
         queue_gateway=queue_gateway,
         organization_id_resolver=organization,
@@ -110,7 +139,7 @@ def build_production_admin_application(
         persist_line_subjects=False,
         reservation_guard=AdminSendCapabilityGuard(client=boundary.client, scope_resolver=scope_resolver),
         linkage_lookup=lookup_linkages,
-        recipient_status_lookup=lookup_preferences,
+        recipient_snapshot_lookup=lookup_snapshot,
         selected_recipient_limit=LOCAL_MAX_SELECTED_RECIPIENTS if runtime_settings.app_env == "local" else None,
     )
     application = AdminApplicationService(

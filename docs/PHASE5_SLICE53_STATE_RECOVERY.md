@@ -1,5 +1,7 @@
 # Phase 5 Slice 5.3 — State Recovery / Consistency / Final Gate
 
+> Current notification behavior and upgrade gates: [NOTIFICATION_ENHANCEMENTS.md](NOTIFICATION_ENHANCEMENTS.md). This supersedes older notification execution/count semantics below.
+
 判定: **COMPLETE_WITH_NOTES**。Phase 5 End Verification は未実施。
 
 ## 実装範囲と現状との差分

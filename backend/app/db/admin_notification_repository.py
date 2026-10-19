@@ -456,6 +456,7 @@ class SqlAlchemyAdminNotificationRepository:
     @staticmethod
     def _outbox_values(item):
         return {
+            "linkage_version": item.linkage_version,
             "outbox_id": str(item.outbox_id),
             "command_id": str(item.command_id),
             "operation_id": str(item.operation_id),
@@ -482,6 +483,7 @@ class SqlAlchemyAdminNotificationRepository:
     @staticmethod
     def _outbox(row):
         return NotificationOutboxRecord(
+            linkage_version=row["linkage_version"],
             outbox_id=UUID(row["outbox_id"]),
             command_id=UUID(row["command_id"]),
             operation_id=UUID(row["operation_id"]),
@@ -642,9 +644,15 @@ class SqlAlchemyAdminNotificationRepository:
                  error_message=None, updated_at=self._now()))
 
     async def _aggregate(self, conn, operation):
-        statuses = (await conn.execute(select(admin_notification_deliveries.c.status).where(
-            admin_notification_deliveries.c.operation_id == str(operation.operation_id)
-        ))).scalars().all()
+        from app.domain.models.delivery_population import selected_deliveries
+        from types import SimpleNamespace
+        rows = (await conn.execute(select(admin_notification_deliveries).where(
+            admin_notification_deliveries.c.operation_id == str(operation.operation_id)))).mappings().all()
+        targets = (await conn.execute(select(admin_notification_targets).where(
+            admin_notification_targets.c.operation_id == str(operation.operation_id)))).mappings().all()
+        deliveries = selected_deliveries(operation, tuple(SimpleNamespace(**dict(t)) for t in targets),
+                                        tuple(self._delivery(row) for row in rows))
+        statuses = [row.status.value for row in deliveries]
         if not statuses or operation.send_requested_at is None or operation.status is OperationStatus.CANCELLED:
             return operation
         if DeliveryStatus.PENDING.value in statuses:
