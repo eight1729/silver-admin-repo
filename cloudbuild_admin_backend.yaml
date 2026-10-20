@@ -1,0 +1,19 @@
+# 管理画面の裏方（backend/）を、ビルド専用のアカウント admin-build@ でビルドし、admin-images に置く
+#
+# リポジトリの一番上で（<commit> は出すコミットのハッシュ）:
+#   gcloud builds submit backend --config cloudbuild_admin_backend.yaml --gcs-source-staging-dir gs://ic-line-sandbox-admin-build-src/source --substitutions _COMMIT=<commit> --project ic-line-sandbox
+#
+# 実行アカウント・ログの置き場所・置き場所は固定です。_COMMIT を付け忘れると受け付けられません。
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - asia-northeast1-docker.pkg.dev/ic-line-sandbox/admin-images/admin-backend:${_COMMIT}
+      - .
+images:
+  - asia-northeast1-docker.pkg.dev/ic-line-sandbox/admin-images/admin-backend:${_COMMIT}
+serviceAccount: projects/ic-line-sandbox/serviceAccounts/admin-build@ic-line-sandbox.iam.gserviceaccount.com
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 1200s

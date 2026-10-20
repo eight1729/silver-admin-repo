@@ -1,0 +1,24 @@
+# 管理画面の画面（frontend/）を、ビルド専用のアカウント admin-build@ でビルドし、admin-images に置く
+#
+# リポジトリの一番上で（<commit> は出すコミットのハッシュ）:
+#   gcloud builds submit frontend --config cloudbuild_admin_frontend.yaml --gcs-source-staging-dir gs://ic-line-sandbox-admin-build-src/source --substitutions _COMMIT=<commit> --project ic-line-sandbox
+#
+# build arg の 4 つは公開値です（画面の JS に焼き込まれます。Cloud Run の環境変数では変えられません）。
+# 実行アカウント・ログの置き場所・置き場所は固定です。_COMMIT を付け忘れると受け付けられません。
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=APP_ENV=production
+      - --build-arg=NEXT_PUBLIC_ADMIN_API_BASE_URL=https://admin-backend-ix3v47zn3a-an.a.run.app
+      - --build-arg=NEXT_PUBLIC_ADMIN_SERVICE_ID=silver-sumida
+      - --build-arg=NEXT_PUBLIC_GOOGLE_CLIENT_ID=629610557941-ltr2sj654d4bcjgfs3u58ur50g466ep4.apps.googleusercontent.com
+      - -t
+      - asia-northeast1-docker.pkg.dev/ic-line-sandbox/admin-images/admin-frontend:${_COMMIT}
+      - .
+images:
+  - asia-northeast1-docker.pkg.dev/ic-line-sandbox/admin-images/admin-frontend:${_COMMIT}
+serviceAccount: projects/ic-line-sandbox/serviceAccounts/admin-build@ic-line-sandbox.iam.gserviceaccount.com
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 1200s
