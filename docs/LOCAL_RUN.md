@@ -69,6 +69,12 @@ canonical targetはfrontend/targets/adminです。npm run dev/build/startはenv�
 
 ブラウザでGoogleに登録したoriginの/adminを開き、Google Loginを人間が確認します。
 
+`next.config.js`は既存の環境読み込み・検査後の正規化済みAPP_ENVがlocalの場合だけ、
+`allowedDevOrigins: ["127.0.0.1"]`を追加します。localhostは既定で許可されます。
+これはNext.js開発用リソースの許可ホストであり、Backend APIのCORSとは別です。
+変更後は開発サーバーを再起動してください。`APP_ENV=local`でもbuild → startは開発サーバーにはなりません。
+productionではallowedDevOriginsを設定しません。
+
 ## 送信制御とManual Gate
 
 Backendはlocalでselected target count > 10を送信予約・Delivery/Outbox生成前に拒否します。11 selected / 10 sendable（1 skipped）も拒否します。10以下でもLINE capabilityがready=false、取得失敗、上限超過なら拒否します。productionには固定10人上限を適用しません。
@@ -84,6 +90,28 @@ runnerは起動後に保存済み未完了Operationを再開します。接続�
 APP_ENV=productionと全設定をCloud process env / Secretで指定します。Backend/Frontendともlocal owner dotenvへfallbackしません。不足設定はstartup/buildを失敗させます。production DB、LINE Backend、双方向Bearerをlocalと分離し、LINE/外部業務APIへのHTTPSを維持します。HTTPSだけでは接続先環境を識別できないため、URLとcredentialの組合せを人間が確認します。
 
 NEXT_PUBLIC_*はbuild-timeにbundleへ固定され、runtime env変更だけでは接続先を切り替えられません。変更時は再buildし、APP_ENVと公開設定をbuild/startで一致させます。VercelでもBuild Commandはnpm run buildを使用し、Cloud側で設定します。deploymentは人間が実施します。
+
+### URLとCORSの手動設定先
+
+localの値は`.env.admin.example`を参照してください。本番値はローカル用サンプルへ混在させず、
+以下の対応先へ手動設定します。APP_ENVだけではAPI URLやCORS値は自動選択されません。
+
+| 設定先（production） | 変数 | 値 |
+| --- | --- | --- |
+| Admin Frontendのbuild/startプロセスとAdmin BackendのCloud Run | `APP_ENV` | `production` |
+| Admin Frontendのビルド環境 | `NEXT_PUBLIC_ADMIN_API_BASE_URL` | `<デプロイ時に確認するAdmin BackendのHTTPS URL>` |
+| Admin BackendのCloud Run | `ADMIN_CORS_ALLOWED_ORIGINS` | `https://admin-frontend-629610557941.asia-northeast1.run.app` |
+
+Admin Backendの本番URLは未確定です。推測せずデプロイ時に確認し、FrontendのAPI接続先へ設定してから再ビルドします。
+Cloud RunのFrontendでは、既存のbuild argsと実行時公開設定も同じ値に揃えます。
+CORSはFrontendのOriginをカンマ区切り文字列で指定し、schemeと必要なportを含め、末尾スラッシュやパスは含めません。
+本番CORSにlocalhost・127.0.0.1・開発用ngrokを混ぜず、Backend間通信用URLも追加しません。
+CORSは認証の代替ではなく、Googleトークン検証とStaff認可を引き続き使用します。
+
+Backend間通信は既存の`ADMIN_LINE_INTERNAL_API_BASE_URL`とLINE側の`LINE_ADMIN_INTERNAL_API_BASE_URL`、
+対応する双方向Bearerを各環境の接続先と整合させます。
+Googleの登録Origin、Frontendの`NEXT_PUBLIC_GOOGLE_CLIENT_ID`、Backendの`ADMIN_OIDC_AUDIENCE`も環境ごとに揃えます。
+Google側の登録変更は利用者の手動作業です。この設定例の更新は実env・Cloud Run・認証サービスの設定反映を行いません。
 
 ## Offline検証
 
