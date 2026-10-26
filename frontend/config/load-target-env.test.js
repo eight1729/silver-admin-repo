@@ -4,6 +4,28 @@ const test = require("node:test");
 
 const { loadTargetEnv, targetEnvPath } = require("./load-target-env");
 
+test("launcher keeps environment checks before Next and uses webpack only for dev/build", () => {
+  const source = require("node:fs").readFileSync(path.join(__dirname, "run-next.js"), "utf8");
+  for (const command of ["dev", "build", "start"]) {
+    const calls = [];
+    const process = { execPath: "node", argv: ["node", "run-next.js", command, "--port", "8080"] };
+    const mockRequire = Object.assign((id) => {
+      if (id === "path") return path;
+      if (id === "./load-target-env") return {
+        rejectNextDotenv: () => calls.push("reject"),
+        loadTargetEnv: target => calls.push(target),
+        validatePublicEnv: () => calls.push("validate"),
+      };
+      assert.equal(id, "next-cli");
+      calls.push("next");
+    }, { resolve: () => "next-cli" });
+    require("node:vm").runInNewContext(source, { require: mockRequire, process, __dirname });
+    assert.deepEqual(calls, ["reject", "admin", "validate", "next"]);
+    assert.deepEqual(Array.from(process.argv), ["node", "next-cli", command,
+      path.resolve(__dirname, "../targets/admin"), ...(command === "start" ? [] : ["--webpack"]), "--port", "8080"]);
+  }
+});
+
 test("Admin target resolves only the repository-local Admin env path", () => {
   const repositoryRoot = path.resolve(__dirname, "../..");
   assert.equal(targetEnvPath("admin"), path.join(repositoryRoot, ".env.admin"));

@@ -5,7 +5,7 @@
 # APP_ENV must remain identical at build/start; do not override it on Cloud Run.
 ARG APP_ENV=production
 
-FROM node:22-bookworm-slim AS dependencies
+FROM node:22.23.4-bookworm-slim AS dependencies
 WORKDIR /app/frontend
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY package.json package-lock.json ./
@@ -29,7 +29,7 @@ RUN mkdir -p targets/admin/public && npm run build \
 FROM dependencies AS production-dependencies
 RUN npm prune --omit=dev && npm cache clean --force
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:22.23.4-bookworm-slim AS runtime
 WORKDIR /app/frontend
 ARG APP_ENV
 ENV NODE_ENV=production \

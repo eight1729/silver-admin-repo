@@ -9,6 +9,7 @@ steps:
   - name: gcr.io/cloud-builders/docker
     args:
       - build
+      - --pull
       - --build-arg=APP_ENV=production
       - --build-arg=NEXT_PUBLIC_ADMIN_API_BASE_URL=https://admin-backend-ix3v47zn3a-an.a.run.app
       - --build-arg=NEXT_PUBLIC_ADMIN_SERVICE_ID=silver-sumida
