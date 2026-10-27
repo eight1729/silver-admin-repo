@@ -9,9 +9,9 @@ def automatic_context(operation):
     context = (operation.validation_snapshot or {}).get("automatic_selection")
     if context is None:
         return None
-    # Re-evaluate only known transient dependency verdicts; preserve staff intent.
+    # Re-evaluate transient dependencies and body-only errors; preserve member exclusions.
     return {**context, "excluded": {key: value for key, value in context["excluded"].items()
-        if value.get("reason") not in {"external_timeout", "external_rate_limited", "external_invalid_response"}}}
+        if value.get("reason") not in {"external_timeout", "external_rate_limited", "external_invalid_response", "empty_notification_message"}}}
 
 
 def context_snapshot(operation):

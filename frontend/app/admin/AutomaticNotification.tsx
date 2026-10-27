@@ -203,8 +203,7 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
     selectionGeneration.current++;
     const savedBody = await track("通知文を保存中…", () => adminApi.updateOperation(op.operation_id, body));
     storeOperation(savedBody);
-    // Incomplete new drafts must not create recipient exclusion latches.
-    if (!hasUnfilledNotificationFields(body)) await track("送信前の検証中…", () => adminApi.validate(op.operation_id));
+    await track("送信前の検証中…", () => adminApi.validate(op.operation_id));
     const [current, view, cap, targetLink] = await Promise.all([
       track("通知の状態を取得中…", () => adminApi.operation(op.operation_id)), track("送信前の確認情報を取得中…", () => adminApi.confirmation(op.operation_id)), track("送信設定を確認中…", () => adminApi.lineSendMode()), track("求人リンクを取得中…", () => adminApi.notificationLink(detail.job_id)),
     ]);

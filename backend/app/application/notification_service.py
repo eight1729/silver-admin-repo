@@ -224,12 +224,17 @@ def _message(greeting: str, introduction: str, note: str) -> NotificationMessage
     return NotificationMessage(greeting=greeting, introduction=introduction, note=note)
 
 
-def _message_valid(message: NotificationMessage) -> bool:
+def _message_has_unfilled_fields(message: NotificationMessage) -> bool:
     # Only generated field lines are reserved; prose mentioning unfilled fields is editable.
-    # Drafts remain saveable; unresolved generated fields cannot pass send validation.
     import re
-    if any(re.search(r"^[ \t　]*【未入力：(センター名|仕事内容|働く場所|働く日|時間|配分金|募集人数)】(?:です。)?[ \t　]*\r?$", value, re.MULTILINE) for value in
-           (message.greeting, message.introduction, message.note)):
+    return any(re.fullmatch(r"[ \t　]*【未入力：(センター名|仕事内容|働く場所|働く日|時間|配分金|募集人数)】(?:です。)?[ \t　]*", line)
+               for value in (message.greeting, message.introduction, message.note)
+               for line in re.split(r"\r\n|[\n\r\u2028\u2029]", value.replace("\u2063", "")))
+
+
+def _message_valid(message: NotificationMessage) -> bool:
+    # Drafts remain saveable; unresolved generated fields cannot pass send validation.
+    if _message_has_unfilled_fields(message):
         return False
     return all(
         value and value.strip()
@@ -780,7 +785,10 @@ class NotificationService:
                 reason="notification_preferences_unavailable") if item.delivery_disposition is ValidationDisposition.SEND
                 and not item.linkage_version else item for item in items)
         reconfirm = reconfirm or target_difference
-        if automatic_context(operation) is not None and (not job_valid or not version_matches or not _message_valid(operation.message)):
+        # Missing copy blocks the operation, not otherwise eligible recipients.
+        # Do not latch a message-editing task as a member exclusion.
+        if automatic_context(operation) is not None and (not job_valid or not version_matches or
+                (not _message_valid(operation.message) and not _message_has_unfilled_fields(operation.message))):
             items = tuple(replace(item, eligible=False, delivery_disposition=ValidationDisposition.BLOCK,
                 reason=blocking_reason or "empty_notification_message") if item.selected else item for item in items)
         sends = sum(

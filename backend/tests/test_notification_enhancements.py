@@ -121,7 +121,7 @@ async def test_admin_message_guard_rejects_long_save_and_dependency_failure(db):
 
 @pytest.mark.parametrize("automatic", [False, True])
 async def test_unfilled_template_can_save_but_cannot_validate_or_send(db, automatic):
-    w = await world(db)
+    w = await world(db, count=1)
     op = await w.app.create_operation(service_id="svc", staff_id="staff", job_id="JOB-001",
         notification_type=NotificationType.NEW_JOB_MATCH, greeting="本文\n　【未入力：配分金】",
         introduction="\u2063", note="\u2063", automatic_selection=automatic)
@@ -134,13 +134,12 @@ async def test_unfilled_template_can_save_but_cannot_validate_or_send(db, automa
         staff=SimpleNamespace(service_id="svc", staff_id="staff"), service=w.app)
     assert "empty_notification_message" in response.reasons
     assert not response.can_proceed and response.confirmation_token is None
+    assert response.selected_count == response.sendable_count == 1
+    assert response.skipped_count == 0
+    assert all(item.reason != "empty_notification_message" for item in response.target_results)
     assert not await w.repo.get_outbox_records("svc", op.operation_id)
     await w.app.update_operation(service_id="svc", operation_id=op.operation_id, staff_id="staff",
         greeting="本文1,200円/時間", introduction="\u2063", note="\u2063")
-    if automatic:
-        # Keep the existing explicit re-selection requirement after a blocked validation.
-        await w.app.replace_targets(service_id="svc", operation_id=op.operation_id, staff_id="staff",
-            selected_member_ids=tuple(w.members), reinclude_member_ids=tuple(w.members))
     result = await w.app.validate(service_id="svc", operation_id=op.operation_id, staff_id="staff", request_id="filled")
     assert result.can_proceed
 
@@ -180,3 +179,44 @@ async def test_legacy_draft_roundtrip_and_revalidation_preserve_free_text(db, au
     result = await w.app.validate(service_id="svc", operation_id=op.operation_id, staff_id="staff", request_id="legacy")
     assert result.can_proceed
     assert (await w.repo.get_operation("svc", op.operation_id)).message == restored.message
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r\n", "\r", "\u2028", "\u2029"])
+def test_unfilled_detection_matches_delivered_compatibility_text(separator):
+    from app.application.notification_service import _message_valid
+    message = SimpleNamespace(greeting=f"本文{separator}\u2063　【未入力：配分金】\u2063{separator}", introduction="\u2063", note="\u2063")
+    assert not _message_valid(message)
+    message.greeting = f"本文{separator}「【未入力：配分金】」の説明{separator}"
+    assert _message_valid(message)
+
+
+@pytest.mark.parametrize("prefix", [None, "[TEST]"])
+@pytest.mark.parametrize("size", [4999, 5000, 5001])
+def test_unicode_trim_matches_frontend_at_utf16_boundary(prefix, size):
+    link = "https://liff.line.me/example"
+    message = SimpleNamespace(greeting="\ufeff😀\ufeff", introduction="\u2063", note="\u2063")
+    base = final_notification_text(message, link, prefix)
+    assert base == ("[TEST]\n\n\ufeff" if prefix else "") + "😀\n" + link
+    message.greeting = "\ufeff😀" + "a" * (size - utf16_units(base)) + "\ufeff"
+    final = final_notification_text(message, link, prefix)
+    assert utf16_units(final) == size
+    if size > 5000:
+        with pytest.raises(MessageTooLongError): validate_final_text(final)
+    else: assert validate_final_text(final) == final
+    message.greeting = "\u0085本文\u0085"
+    assert "\u0085本文\u0085" in final_notification_text(message, link, prefix)
+
+
+async def test_saved_body_only_exclusion_can_revalidate_without_reviving_member_exclusion(db):
+    w = await world(db)
+    op = await prepare(w)
+    saved = await w.repo.get_operation("svc", op)
+    context = dict(saved.validation_snapshot["automatic_selection"])
+    context["excluded"] = {"m-0": {"reason": "empty_notification_message", "disposition": "block"},
+        "m-1": {"reason": "member_ineligible", "disposition": "skip"}}
+    await w.repo.update_operation("svc", op, replace(saved, validation_snapshot={"automatic_selection": context}))
+    view = await validate(w, op)
+    assert view["can_send"] and view["sendable_count"] == 2 and view["excluded_count"] == 1
+    current = await w.repo.get_operation("svc", op)
+    assert set(current.validation_snapshot["automatic_selection"]["excluded"]) == {"m-1"}
+    assert current.message == saved.message

@@ -150,7 +150,7 @@ test("automatic screen saves standard draft and validates but sends only from fi
   const h = harness(); h.render(); await flush();
   const choose = find(h.render(), node => node.type === "jobs").props.select;
   await Promise.all([choose("JOB-1"), choose("JOB-1")]);
-  assert.deepEqual(h.calls, ["create", "targets", "message"]);
+  assert.deepEqual(h.calls, ["create", "targets", "message", "validate"]);
   assert.equal(find(h.render(), node => node.type === "modal"), undefined);
   const editor = find(h.render(), node => node.type === "editor");
   assert.ok(templates.hasUnfilledNotificationFields(editor.props.message));
@@ -170,7 +170,7 @@ test("target-save failure retries the same operation and reload never restores a
   await find(h.render(), node => node.type === "jobs").props.select("JOB-1");
   assert.deepEqual(h.calls, ["create", "targets"]);
   await find(h.render(), node => node.type === "members").props.begin();
-  assert.deepEqual(h.calls, ["create", "targets", "targets", "message"]);
+  assert.deepEqual(h.calls, ["create", "targets", "targets", "message", "validate"]);
   const restored = harness({ restored: true }); restored.render(); await flush();
   const tree = restored.render();
   assert.ok(find(tree, node => node.type === "editor"));
@@ -194,7 +194,7 @@ test("previous stored operation cannot contaminate new automatic work or restore
   assert.ok(find(h.render(), n => n.type === "jobs"));
   assert.equal(find(h.render(), n => n.type === "results"), undefined);
   await find(h.render(), n => n.type === "jobs").props.select("JOB-1");
-  assert.deepEqual(h.calls, ["create", "targets", "message"]);
+  assert.deepEqual(h.calls, ["create", "targets", "message", "validate"]);
   assert.ok(h.urls.some(url => url.includes("operationId=op-1")));
 });
 

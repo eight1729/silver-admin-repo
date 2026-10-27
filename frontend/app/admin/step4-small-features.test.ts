@@ -147,3 +147,11 @@ test("unfilled checks reserve generated field lines without restricting custom p
     assert.equal(hasUnfilledNotificationFields(composeAdminMessage(`本文\n　【未入力：${field}】\n`, "注意")), true);
   assert.equal(hasUnfilledNotificationFields(composeAdminMessage("【未入力：センター名】です。\r\n本文", "注意")), true);
 });
+
+
+test("unfilled detection matches delivered compatibility text across line endings", () => {
+  for (const separator of ["\n", "\r\n", "\r", "\u2028", "\u2029"]) {
+    assert.equal(hasUnfilledNotificationFields(composeAdminMessage(`本文${separator}\u2063　【未入力：配分金】\u2063${separator}`, "注意")), true);
+    assert.equal(hasUnfilledNotificationFields(composeAdminMessage(`本文${separator}「【未入力：配分金】」の説明${separator}`, "注意")), false);
+  }
+});

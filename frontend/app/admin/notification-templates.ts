@@ -8,7 +8,8 @@ const TEMPLATE_CLOSING = "ほかにもおすすめのお仕事があります。
 const STANDARD_CLOSING = "━━━━━━━━━━━━\nご希望の方は、下の「電話する」ボタンからセンターへご連絡ください。\n\nその他の仕事は↓メニュー「求人中のお仕事」からご確認ください。";
 
 export function hasUnfilledNotificationFields(message: AdminMessage): boolean {
-  return Object.values(message).some(value => /^[ \t　]*【未入力：(センター名|仕事内容|働く場所|働く日|時間|配分金|募集人数)】(?:です。)?[ \t　]*\r?$/m.test(value));
+  return Object.values(message).some(value => value.replace(/\u2063/g, "").split(/\r\n|[\n\r\u2028\u2029]/).some((line: string) =>
+    /^[ \t　]*【未入力：(センター名|仕事内容|働く場所|働く日|時間|配分金|募集人数)】(?:です。)?[ \t　]*$/.test(line)));
 }
 
 export type NotificationTemplateId = "standard" | "urgent" | "reminder" | "personal" | "blank";
