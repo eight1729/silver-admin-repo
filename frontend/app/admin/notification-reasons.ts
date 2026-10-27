@@ -1,6 +1,7 @@
 export function notificationReasonLabel(reason: string | null): string {
   if (!reason) return "—";
   return ({
+    empty_notification_message: "通知文に未入力箇所があります。入力後、保存して再検証してください。",
     invalid_message: "通知本文の形式が不正です",
     message_too_long: "通知本文が上限を超えています", bad_request: "通知リクエストが不正です",
     linkage_changed: "会員連携が変更されたため送信を停止しました。",

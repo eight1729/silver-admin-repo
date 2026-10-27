@@ -42,11 +42,34 @@ test("final UTF-16 length includes normalized local prefix, emoji, URL and separ
   const body = { ...message, greeting: "[TEST]\n\n[TEST]\n\n😀" };
   const link = "https://liff.line.me/test/jobs/job";
   const final = finalNotificationText(body, link, mode)!;
-  assert.equal(final, `[TEST]\n\n😀\n\njob\n\nnote\n\n${link}`);
+  assert.equal(final, `[TEST]\n\n😀\n\njob\n\nnote\n${link}`);
   for (const size of [4999, 5000, 5001]) {
     const padded: string = finalNotificationText({ ...body, note: body.note + "x".repeat(size - final.length) }, link, mode)!;
     assert.equal(padded.length <= 5000, size <= 5000);
   }
   assert.equal(finalNotificationText(body, null, mode), null);
   assert.equal(finalNotificationText(body, link, { ...mode, message_prefix: null }), null);
+});
+
+
+test("empty compatibility sections disappear while internal blank lines survive", () => {
+  const original = { greeting: "本文\n\n内部\n\n", introduction: " \u2063 ", note: "\u2063" };
+  assert.equal(finalNotificationText(original, "https://liff.line.me/example", { mode: "production_live", max_recipients: null, message_prefix: null }), "本文\n\n内部\nhttps://liff.line.me/example");
+  assert.equal(original.note, "\u2063");
+});
+
+
+test("Unicode section whitespace follows the same contract as both Python backends", () => {
+  const mode = { mode: "production_live" as const, max_recipients: null, message_prefix: null };
+  const link = "https://liff.line.me/example";
+  assert.equal(finalNotificationText({ greeting: "\ufeff本文\ufeff", introduction: "\u2063", note: "\u2063" }, link, mode), `本文\n${link}`);
+  assert.equal(finalNotificationText({ greeting: "\u0085本文\u0085", introduction: "\u2063", note: "\u2063" }, link, mode), `\u0085本文\u0085\n${link}`);
+  for (const prefix of [null, "[TEST]"]) for (const size of [4999, 5000, 5001]) {
+    const cap = { ...mode, mode: prefix ? "staging_live" as const : "production_live" as const, message_prefix: prefix };
+    const base = { greeting: "\ufeff😀\ufeff", introduction: "\u2063", note: "\u2063" };
+    const remaining = size - finalNotificationText(base, link, cap)!.length;
+    const final = finalNotificationText({ ...base, greeting: `\ufeff😀${"a".repeat(remaining)}\ufeff` }, link, cap)!;
+    assert.equal(final.length, size);
+    assert.equal(final.length <= 5000, size <= 5000);
+  }
 });

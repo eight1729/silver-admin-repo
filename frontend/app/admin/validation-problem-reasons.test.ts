@@ -43,3 +43,13 @@ test("SendOverview filters only detail reasons and keeps success and label rende
   assert.equal(notificationReasonLabel("job_closed"), "求人募集終了");
   assert.equal(notificationReasonLabel("job_version_changed"), "求人情報更新あり");
 });
+
+
+test("unfilled notification reason has a dedicated recovery instruction without changing other errors", () => {
+  const reasons = ["empty_notification_message", "member_ineligible", "line_not_linked", "no_sendable_targets", "unrecognized_reason"];
+  assert.deepEqual(validationProblemReasons(reasons).map(notificationReasonLabel), [
+    "通知文に未入力箇所があります。入力後、保存して再検証してください。",
+    "通知対象外", "LINE未連携", "送信可能な対象者がいません", "対象条件を確認してください",
+  ]);
+  assert.equal(notificationReasonLabel(null), "—");
+});

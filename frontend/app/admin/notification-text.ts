@@ -9,5 +9,7 @@ export function finalNotificationText(message: AdminMessage, link: string | null
     while (greeting.startsWith(prefix)) greeting = greeting.slice(prefix.length).trimStart();
     greeting = `${prefix}\n\n${greeting}`;
   }
-  return [greeting, message.introduction, message.note, link].join("\n\n");
+  const body = [greeting, message.introduction, message.note]
+    .map(value => value.replace(/\u2063/g, "").trim()).filter(Boolean).join("\n\n");
+  return body ? `${body}\n${link}` : link;
 }

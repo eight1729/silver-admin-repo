@@ -9,6 +9,7 @@ import * as ordering from "./automatic-workflow.ts";
 import * as capability from "./send-capability.ts";
 import * as uiState from "./notification-ui-state.ts";
 import * as notificationReasons from "./notification-reasons.ts";
+import * as notificationText from "./notification-text.ts";
 import * as templates from "./notification-templates.ts";
 
 const require = createRequire(import.meta.url);
@@ -55,6 +56,7 @@ function harness({ failTargets = false, restored = false, zero = false, stale = 
   };
   const mocks: Record<string, any> = {
     "./notification-reasons": notificationReasons,
+    "./notification-text": notificationText,
     react: { ...React,
       useState: (initial: any) => { const i = stateIndex++; if (!(i in states)) states[i] = typeof initial === "function" ? initial() : initial;
         return [states[i], (value: any) => { states[i] = typeof value === "function" ? value(states[i]) : value; }]; },
@@ -149,6 +151,10 @@ test("automatic screen saves standard draft and validates but sends only from fi
   const choose = find(h.render(), node => node.type === "jobs").props.select;
   await Promise.all([choose("JOB-1"), choose("JOB-1")]);
   assert.deepEqual(h.calls, ["create", "targets", "message", "validate"]);
+  assert.equal(find(h.render(), node => node.type === "modal"), undefined);
+  const editor = find(h.render(), node => node.type === "editor");
+  assert.ok(templates.hasUnfilledNotificationFields(editor.props.message));
+  await fillTemplate(h);
   const confirm = find(h.render(), node => node.type === "modal");
   assert.ok(confirm);
   assert.equal(confirm.props.placement, "center");
@@ -203,6 +209,7 @@ test("completed automatic results start a fresh job-list handoff without mutatin
 test("accepted but incomplete send does not allow changing job through the result action", async () => {
   const h = harness(); h.render(); await flush();
   await find(h.render(), n => n.type === "jobs").props.select("JOB-1");
+  await fillTemplate(h);
   find(h.render(), n => n.type === "button" && n.props.children === "送信").props.onClick();await flush();h.render();await flush();
   const button=find(h.render(), n => n.type === "button" && n.props.children === "求人を変更して新規作成");
   assert.equal(button.props.disabled, true);button.props.onClick();assert.deepEqual(h.locations, []);
@@ -272,3 +279,11 @@ test("result retry converges from waiting to completed using reads only", async 
   assert.equal(result.props.error, ""); assert.equal(result.props.operation.status, "completed");
   assert.equal(result.props.deliveries.items[0].status, "sent"); assert.deepEqual(h.calls, []);
 });
+
+
+async function fillTemplate(h: ReturnType<typeof harness>) {
+  const editor = find(h.render(), n => n.type === "editor");
+  editor.props.setMessage({ ...editor.props.message, greeting: editor.props.message.greeting.replace(/【未入力：[^】]+】/g, "架空の入力済み値") });
+  await find(h.render(), n => n.type === "button" && n.props.children === "保存・再検証して最終確認へ").props.onClick();
+  await flush();
+}
