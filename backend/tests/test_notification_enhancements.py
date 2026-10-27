@@ -117,3 +117,60 @@ async def test_admin_message_guard_rejects_long_save_and_dependency_failure(db):
     with pytest.raises(AdminExternalSystemUnavailableError):
         await w.app.validate(service_id="svc", operation_id=op, staff_id="staff", request_id="fail")
     assert not await w.repo.get_outbox_records("svc", op)
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+async def test_unfilled_template_can_save_but_cannot_validate_or_send(db, automatic):
+    w = await world(db)
+    op = await w.app.create_operation(service_id="svc", staff_id="staff", job_id="JOB-001",
+        notification_type=NotificationType.NEW_JOB_MATCH, greeting="本文\n　【未入力：配分金】",
+        introduction="\u2063", note="\u2063", automatic_selection=automatic)
+    await w.app.replace_targets(service_id="svc", operation_id=op.operation_id, staff_id="staff", selected_member_ids=tuple(w.members))
+    result = await w.app.validate(service_id="svc", operation_id=op.operation_id, staff_id="staff", request_id="missing")
+    assert not result.can_proceed
+    assert not await w.repo.get_outbox_records("svc", op.operation_id)
+    await w.app.update_operation(service_id="svc", operation_id=op.operation_id, staff_id="staff",
+        greeting="本文1,200円/時間", introduction="\u2063", note="\u2063")
+    if automatic:
+        # Keep the existing explicit re-selection requirement after a blocked validation.
+        await w.app.replace_targets(service_id="svc", operation_id=op.operation_id, staff_id="staff",
+            selected_member_ids=tuple(w.members), reinclude_member_ids=tuple(w.members))
+    result = await w.app.validate(service_id="svc", operation_id=op.operation_id, staff_id="staff", request_id="filled")
+    assert result.can_proceed
+
+
+def test_final_text_compat_sections_and_internal_blank_lines():
+    message = SimpleNamespace(greeting="本文\n\n内部\n\n", introduction=" \u2063 ", note="\u2063")
+    assert final_notification_text(message, "https://liff.line.me/example") == "本文\n\n内部\nhttps://liff.line.me/example"
+    assert message.note == "\u2063"
+
+
+@pytest.mark.parametrize("greeting,valid", [
+    ("本文\n　【未入力：配分金】", False),
+    ("【未入力：センター名】です。\r\n本文", False),
+    ("本文\n　【未入力：担当者】", True),
+    ("【未入力：配分金】という表示は入力欄の説明です。", True),
+    ("自由編集した通知文", True),
+    ("【急募：清掃】\n表示センターです。", True),
+    ("【再案内：清掃】\n表示センターです。", True),
+    ("【個別案内：清掃】\n表示センターです。", True),
+    ("", False),
+])
+def test_unfilled_validation_reserves_only_generated_field_lines(greeting, valid):
+    from app.application.notification_service import _message_valid
+    assert _message_valid(SimpleNamespace(greeting=greeting, introduction="\u2063", note="\u2063")) is valid
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+async def test_legacy_draft_roundtrip_and_revalidation_preserve_free_text(db, automatic):
+    w = await world(db)
+    message = dict(greeting="保存済みの自由文", introduction="【未入力：担当者】",
+                   note="【未入力：配分金】という表示は入力欄の説明です。")
+    op = await w.app.create_operation(service_id="svc", staff_id="staff", job_id="JOB-001",
+        notification_type=NotificationType.NEW_JOB_MATCH, automatic_selection=automatic, **message)
+    restored = await w.repo.get_operation("svc", op.operation_id)
+    assert {key: getattr(restored.message, key) for key in message} == message
+    await w.app.replace_targets(service_id="svc", operation_id=op.operation_id, staff_id="staff", selected_member_ids=tuple(w.members))
+    result = await w.app.validate(service_id="svc", operation_id=op.operation_id, staff_id="staff", request_id="legacy")
+    assert result.can_proceed
+    assert (await w.repo.get_operation("svc", op.operation_id)).message == restored.message

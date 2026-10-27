@@ -14,7 +14,10 @@ def final_notification_text(message, link, prefix=None):
         while greeting.startswith(prefix):
             greeting = greeting[len(prefix):].lstrip()
         greeting = prefix + "\n\n" + greeting
-    return "\n\n".join((greeting, message.introduction, message.note, link))
+    sections = (value.replace("\u2063", "").strip()
+                for value in (greeting, message.introduction, message.note))
+    body = "\n\n".join(value for value in sections if value)
+    return body + "\n" + link if body else link
 
 
 def utf16_units(text):

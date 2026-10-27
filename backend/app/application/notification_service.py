@@ -225,6 +225,12 @@ def _message(greeting: str, introduction: str, note: str) -> NotificationMessage
 
 
 def _message_valid(message: NotificationMessage) -> bool:
+    # Only generated field lines are reserved; prose mentioning unfilled fields is editable.
+    # Drafts remain saveable; unresolved generated fields cannot pass send validation.
+    import re
+    if any(re.search(r"^[ \t　]*【未入力：(センター名|仕事内容|働く場所|働く日|時間|配分金|募集人数)】(?:です。)?[ \t　]*\r?$", value, re.MULTILINE) for value in
+           (message.greeting, message.introduction, message.note)):
+        return False
     return all(
         value and value.strip()
         for value in (message.greeting, message.introduction, message.note)

@@ -12,11 +12,12 @@ import { LoadingOverlay } from "./LoadingOverlay";
 import { CandidateSelectionPanel, JobSelectionPanel, MessageEditorPanel } from "./MajorPanels";
 import { Modal } from "../components/Modal";
 import { AUTO_OPERATION_KEY, notificationEntryUrl } from "./automatic-workflow";
-import { canAttemptSend, isLiveMode, safetyPrefix } from "./send-capability";
-import { createTemplateMessage, DEFAULT_CENTER_DISPLAY_NAME, replaceExactCenterName, replaceExactNotice, type SelectedTemplateId } from "./notification-templates";
+import { canAttemptSend, isLiveMode } from "./send-capability";
+import { finalNotificationText } from "./notification-text";
+import { notificationNotice, hasUnfilledNotificationFields, createTemplateMessage, DEFAULT_CENTER_DISPLAY_NAME, replaceExactCenterName, replaceExactNotice, type SelectedTemplateId } from "./notification-templates";
 import type { CandidateFilterId } from "./candidate-filters";
 
-const emptyMessage = { greeting: "こんにちは。", introduction: "おすすめの求人をご案内します。", note: "内容をご確認ください。" };
+const emptyMessage = { greeting: "こんにちは。", introduction: "おすすめの求人をご案内します。", note: "" };
 const sendAccepted = (op: AdminOperation) => Boolean(op.send_requested_at || ["sending", "completed", "completed_with_errors"].includes(op.status));
 
 export function AutomaticNotification({ initialJobId, resumeOperationId = null }: { initialJobId: string | null; resumeOperationId?: string | null }) {
@@ -102,8 +103,8 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
           const restoredIds = saved.target_count === 0 && !saved.send_requested_at
             ? (await track("自動選択の対象会員を確認中…", () => adminApi.automaticSelection(saved.job_id, signal))).selected_member_ids : saved.selected_member_ids;
           if (signal.aborted) return;
-          setSelected(new Set(restoredIds)); setMessage(saved.message); setNotice(saved.message.note);
-          setTemplate("custom"); setSelectedLimit(view.selected_recipient_limit); appliedNotice.current = saved.message.note; excluded.current = new Set(view.targets.filter(t => t.disposition !== "send").map(t => t.member_id));
+          setSelected(new Set(restoredIds)); setMessage(saved.message); setNotice(notificationNotice(saved.message));
+          setTemplate("custom"); setSelectedLimit(view.selected_recipient_limit); appliedNotice.current = notificationNotice(saved.message); excluded.current = new Set(view.targets.filter(t => t.disposition !== "send").map(t => t.member_id));
           setPhase("message");
           setError("保存済み通知を復元しました。送信前に再検証してください。");
           if (initialJobId && initialJobId !== saved.job_id) {
@@ -202,7 +203,8 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
     selectionGeneration.current++;
     const savedBody = await track("通知文を保存中…", () => adminApi.updateOperation(op.operation_id, body));
     storeOperation(savedBody);
-    await track("送信前の検証中…", () => adminApi.validate(op.operation_id));
+    // Incomplete new drafts must not create recipient exclusion latches.
+    if (!hasUnfilledNotificationFields(body)) await track("送信前の検証中…", () => adminApi.validate(op.operation_id));
     const [current, view, cap, targetLink] = await Promise.all([
       track("通知の状態を取得中…", () => adminApi.operation(op.operation_id)), track("送信前の確認情報を取得中…", () => adminApi.confirmation(op.operation_id)), track("送信設定を確認中…", () => adminApi.lineSendMode()), track("求人リンクを取得中…", () => adminApi.notificationLink(detail.job_id)),
     ]);
@@ -210,7 +212,7 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
     storeOperation(current); setConfirmation(view); setSelectedLimit(view.selected_recipient_limit); setCapability(cap); setLink(targetLink.url);
     setCandidates(rows => retainMissing(rows, view));
     excluded.current = new Set(view.targets.filter(t => t.disposition !== "send").map(t => t.member_id));
-    setReinclude(new Set()); setPhase("review"); setOpen(true);
+    setReinclude(new Set()); setPhase(hasUnfilledNotificationFields(body) ? "message" : "review"); setOpen(!hasUnfilledNotificationFields(body));
   }
 
   async function start(id: string) {
@@ -221,7 +223,7 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
       if (!alive.current) return;
       if (detail.status !== "published") throw new Error("job is not published");
       const summary = jobs.find(j => j.job_id === id);
-      const body = createTemplateMessage("standard", center, { title: detail.title, description: detail.description,
+      const body = createTemplateMessage("standard", center, { title: detail.title, description: detail.description, location: detail.location,
         summary: summary?.summary, workDays: summary?.work_days, workTime: summary?.work_time }, emptyMessage.note);
       const ids = new Set(choice.selected_member_ids);
       setJob(detail); setCandidates(rows); setSelected(ids); setMessage(body); setPhase("members");
@@ -243,7 +245,8 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
   const limit = selectedLimit;
   const capLimit = capability?.max_recipients ?? null;
   const effectiveLimit = limit === null ? capLimit : capLimit === null ? limit : Math.min(limit, capLimit);
-  const canSend = Boolean(confirmation?.can_send && confirmation.confirmation_token && !confirmation.requires_revalidation
+  const confirmationText = confirmation ? finalNotificationText(confirmation.message, link, capability) : null;
+  const canSend = Boolean(confirmation && !hasUnfilledNotificationFields(confirmation.message) && confirmationText !== null && confirmationText.length <= 5000 && confirmation?.can_send && confirmation.confirmation_token && !confirmation.requires_revalidation
     && canAttemptSend(capability, confirmation.sendable_count) && (!isLiveMode(capability) || link) && !busy);
   async function send() {
     if (!confirmation?.confirmation_token || !canSend || lock.current) return;
@@ -281,7 +284,7 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
     </>}
     {job && operation && phase === "message" && <>
       <MessageEditorPanel job={job} message={message} setMessage={value => { setMessage(value); setConfirmation(null); setTemplate("custom"); }}
-        selectedTemplate={template} applyTemplate={value => { if (value === "custom") return; setTemplate(value); setMessage(createTemplateMessage(value, center, { title: job.title, description: job.description }, notice)); setConfirmation(null); }}
+        selectedTemplate={template} applyTemplate={value => { if (value === "custom") return; setTemplate(value); setMessage(createTemplateMessage(value, center, { title: job.title, description: job.description, location: job.location, workDays: jobs.find(item => item.job_id === job.job_id)?.work_days, workTime: jobs.find(item => item.job_id === job.job_id)?.work_time }, notice)); setConfirmation(null); }}
         centerDisplayNameDraft={center} setCenterDisplayNameDraft={setCenter} noticeDraft={notice} setNoticeDraft={setNotice}
         applyEditorFields={() => {
           setMessage(replaceExactNotice(replaceExactCenterName(message, appliedCenter.current, center.trim()), appliedNotice.current, notice.trim()));
@@ -313,7 +316,7 @@ export function AutomaticNotification({ initialJobId, resumeOperationId = null }
       <button className="admin-button secondary" disabled={busy} onClick={() => edit("members")}>会員を選択</button>
       <button className="admin-button secondary" disabled={busy} onClick={() => edit("message")}>通知文編集</button>
     </>}>
-      <div className="automatic-message">{safetyPrefix(capability)}{[confirmation.message.greeting, confirmation.message.introduction, confirmation.message.note].join("\n\n")}{link && `\n\n${link}`}</div>
+      <div className="automatic-message">{finalNotificationText(confirmation.message, link, capability) ?? "リンク・送信設定の確認待ち"}</div>
       <p>初期選択：{confirmation.initial_count}人 ／ 現在選択：{confirmation.selected_count}人</p>
       <p>送信可能：{confirmation.sendable_count}人 ／ 除外：{confirmation.excluded_count}人</p>
       {confirmation.selected_recipient_limit != null && <p>この環境の選択上限：{confirmation.selected_recipient_limit}人</p>}

@@ -1,15 +1,22 @@
 import type { AdminMessage } from "../lib/admin-api";
 
-export const DEFAULT_CENTER_DISPLAY_NAME = "検証用センター";
+export const DEFAULT_CENTER_DISPLAY_NAME = "【未入力：センター名】";
 export const CENTER_DISPLAY_NAME_MAX_LENGTH = 80;
 const MESSAGE_COMPAT_PLACEHOLDER = "\u2063";
 const TEMPLATE_CLOSING = "ほかにもおすすめのお仕事があります。\nその他のお仕事はLINEミニアプリからご確認ください。";
+
+const STANDARD_CLOSING = "━━━━━━━━━━━━\nご希望の方は、下の「電話する」ボタンからセンターへご連絡ください。\n\nその他の仕事は↓メニュー「求人中のお仕事」からご確認ください。";
+
+export function hasUnfilledNotificationFields(message: AdminMessage): boolean {
+  return Object.values(message).some(value => /^[ \t　]*【未入力：(センター名|仕事内容|働く場所|働く日|時間|配分金|募集人数)】(?:です。)?[ \t　]*\r?$/m.test(value));
+}
 
 export type NotificationTemplateId = "standard" | "urgent" | "reminder" | "personal" | "blank";
 export type SelectedTemplateId = NotificationTemplateId | "custom";
 
 export interface NotificationTemplateJob {
   title: string;
+  location?: string | null;
   description?: string | null;
   workTime?: string | null;
   workDays?: string | null;
@@ -69,6 +76,29 @@ export function createTemplateMessage(
   if (templateId === "blank") return composeAdminMessage("", "");
   const title = clean(job?.title);
   const center = clean(centerName);
+  if (templateId === "standard") {
+    const field = (label: string, value?: string | null) => clean(value) || `【未入力：${label}】`;
+    const body = [
+      `■就業案内
+【お仕事のご案内】
+いつもお世話になっております。
+${center || DEFAULT_CENTER_DISPLAY_NAME}です。
+下記の求人をご案内します。`,
+      `◆ お仕事の内容
+　${field("仕事内容", job?.description)}`,
+      `◆ 働く場所
+　${field("働く場所", job?.location)}`,
+      `◆ 働く日
+　${field("働く日", job?.workDays)}`,
+      `◆ 時間
+　${field("時間", job?.workTime)}`,
+      `◆ 配分金
+　${field("配分金")}`,
+      `◆ 募集人数
+　${field("募集人数")}`,
+    ].join("\n\n");
+    return composeTemplateMessage(`${body}${clean(notice) ? `\n\n${clean(notice)}` : ""}\n${STANDARD_CLOSING}`);
+  }
   const details = [
     ["就業内容", clean(job?.description)],
     ["勤務時間", clean(job?.workTime)],
@@ -89,6 +119,13 @@ export function createTemplateMessage(
 export function notificationNotice(message: AdminMessage): string {
   if (message.note !== MESSAGE_COMPAT_PLACEHOLDER) return message.note;
   const body = notificationBody(message);
+  const standardEnd = body.lastIndexOf(`\n${STANDARD_CLOSING}`);
+  if (standardEnd >= 0) {
+    const recruitment = body.lastIndexOf("◆ 募集人数\n", standardEnd);
+    if (recruitment < 0) return "";
+    const noticeAt = body.indexOf("\n\n", recruitment);
+    return noticeAt >= 0 && noticeAt < standardEnd ? body.slice(noticeAt + 2, standardEnd).trim() : "";
+  }
   const closingAt = body.lastIndexOf(`\n\n${TEMPLATE_CLOSING}`);
   if (closingAt < 0) return "";
   const sections = body.slice(0, closingAt).split("\n\n");
@@ -103,8 +140,11 @@ export function replaceExactNotice(message: AdminMessage, previousNotice: string
   const next = nextNotice.trim();
   if (previous === next) return { ...message };
   if (message.note !== MESSAGE_COMPAT_PLACEHOLDER) return { ...message, note: next };
+  if (previous && body.includes(`\n\n${previous}\n${STANDARD_CLOSING}`)) {
+    return composeTemplateMessage(body.replace(`\n\n${previous}\n${STANDARD_CLOSING}`, `${next ? `\n\n${next}` : ""}\n${STANDARD_CLOSING}`));
+  }
   if (previous && body.includes(previous)) return composeTemplateMessage(body.replace(previous, next).replace(/\n{3,}/g, "\n\n"));
-  const closing = `\n\n${TEMPLATE_CLOSING}`;
+  const closing = body.includes(`\n${STANDARD_CLOSING}`) ? `\n${STANDARD_CLOSING}` : `\n\n${TEMPLATE_CLOSING}`;
   if (!previous && next && body.includes(closing)) return composeTemplateMessage(body.replace(closing, `\n\n${next}${closing}`));
   return { ...message };
 }

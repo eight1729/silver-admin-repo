@@ -3,15 +3,15 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import type { AdminCandidate } from "../lib/admin-api.ts";
 import { candidateFilters, filterCandidates } from "./candidate-filters.ts";
-import { composeAdminMessage, createTemplateMessage, notificationBody, notificationDisplayText, notificationNotice, notificationTemplates, replaceExactCenterName, replaceExactNotice } from "./notification-templates.ts";
+import { composeAdminMessage, hasUnfilledNotificationFields, createTemplateMessage, notificationBody, notificationDisplayText, notificationNotice, notificationTemplates, replaceExactCenterName, replaceExactNotice } from "./notification-templates.ts";
 
-const job = { title: "清掃業務", description: "公園内の清掃", workTime: "8:00〜12:00", workDays: "週3日", summary: "屋外での軽作業" };
+const job = { title: "清掃業務", description: "公園内の清掃", location: "公園", workTime: "8:00〜12:00", workDays: "週3日", summary: "屋外での軽作業" };
 
 test("five notification templates generate only the contracted display text", () => {
   assert.deepEqual(notificationTemplates.map((template) => template.id), ["standard", "urgent", "reminder", "personal", "blank"]);
   const standard = createTemplateMessage("standard", "表示センター", job, "登録状況をご確認ください。");
-  assert.match(notificationBody(standard), /^【清掃業務の求人お知らせについて】/);
-  for (const text of ["表示センターです。", "就業内容）公園内の清掃", "勤務時間）8:00〜12:00", "勤務日）週3日", "概要）屋外での軽作業", "登録状況をご確認ください。", "その他のお仕事はLINEミニアプリからご確認ください。"]) assert.match(notificationBody(standard), new RegExp(text));
+  assert.match(notificationBody(standard), /^■就業案内\n【お仕事のご案内】/);
+  for (const text of ["表示センターです。", "◆ お仕事の内容\n　公園内の清掃", "◆ 時間\n　8:00〜12:00", "◆ 働く日\n　週3日", "◆ 働く場所\n　公園", "登録状況をご確認ください。", "その他の仕事は↓メニュー「求人中のお仕事」からご確認ください。"]) assert.match(notificationBody(standard), new RegExp(text));
   assert.equal(notificationNotice(standard), "登録状況をご確認ください。");
   assert.equal(notificationDisplayText(standard), notificationBody(standard), "notice embedded in the body must not be duplicated");
   assert.doesNotMatch(notificationBody(standard), /https?:\/\/|liff\.line\.me/);
@@ -85,4 +85,65 @@ test("UI keeps filtering separate from selection and validation state", async ()
   assert.match(page, /replaceExactNotice\(nextMessage, appliedNotice, nextNotice\)/);
   assert.match(page, /changeMessageFromTool\(nextMessage, "センター名または注意事項が本文へ反映されたため/);
   assert.doesNotMatch(page, /localStorage|recommendationScore|recommendationRank/);
+});
+
+
+test("standard layout uses verified fields and leaves payment and headcount for staff", () => {
+  const message = createTemplateMessage("standard", "墨田区シルバー人材センター", job);
+  assert.equal(notificationBody(message), `■就業案内
+【お仕事のご案内】
+いつもお世話になっております。
+墨田区シルバー人材センターです。
+下記の求人をご案内します。
+
+◆ お仕事の内容
+　公園内の清掃
+
+◆ 働く場所
+　公園
+
+◆ 働く日
+　週3日
+
+◆ 時間
+　8:00〜12:00
+
+◆ 配分金
+　【未入力：配分金】
+
+◆ 募集人数
+　【未入力：募集人数】
+━━━━━━━━━━━━
+ご希望の方は、下の「電話する」ボタンからセンターへご連絡ください。
+
+その他の仕事は↓メニュー「求人中のお仕事」からご確認ください。`);
+  assert.equal(hasUnfilledNotificationFields(message), true);
+  assert.equal(hasUnfilledNotificationFields({ ...message, greeting: message.greeting.replace("【未入力：配分金】", "1,200円/時間").replace("【未入力：募集人数】", "3名") }), false);
+  const added = replaceExactNotice(message, "", "注意文");
+  assert.equal(notificationNotice(added), "注意文");
+  assert.deepEqual(replaceExactNotice(added, "注意文", ""), message);
+});
+
+test("automatic and manual template entry points carry location, days and time", async () => {
+  for (const file of ["page.tsx", "AutomaticNotification.tsx"]) {
+    const source = await readFile(new URL(file, import.meta.url), "utf8");
+    assert.match(source, /createTemplateMessage\("standard"/);
+    assert.match(source, /location: (?:currentJob|detail)\.location/);
+    assert.match(source, /workDays: summary\?\.work_days/);
+    assert.match(source, /workTime: summary\?\.work_time/);
+    assert.doesNotMatch(source, /内容をご確認ください。/);
+  }
+});
+
+
+test("unfilled checks reserve generated field lines without restricting custom prose or other templates", () => {
+  for (const template of ["urgent", "reminder", "personal"] as const) {
+    assert.equal(hasUnfilledNotificationFields(createTemplateMessage(template, "表示センター", job)), false);
+  }
+  assert.equal(hasUnfilledNotificationFields(createTemplateMessage("blank", "表示センター")), false);
+  for (const text of ["自由編集", "【未入力：担当者】", "【未入力：配分金】という表示は入力欄の説明です。"])
+    assert.equal(hasUnfilledNotificationFields(composeAdminMessage(text, "注意")), false);
+  for (const field of ["センター名", "仕事内容", "働く場所", "働く日", "時間", "配分金", "募集人数"])
+    assert.equal(hasUnfilledNotificationFields(composeAdminMessage(`本文\n　【未入力：${field}】\n`, "注意")), true);
+  assert.equal(hasUnfilledNotificationFields(composeAdminMessage("【未入力：センター名】です。\r\n本文", "注意")), true);
 });
