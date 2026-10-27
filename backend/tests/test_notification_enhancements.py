@@ -128,6 +128,12 @@ async def test_unfilled_template_can_save_but_cannot_validate_or_send(db, automa
     await w.app.replace_targets(service_id="svc", operation_id=op.operation_id, staff_id="staff", selected_member_ids=tuple(w.members))
     result = await w.app.validate(service_id="svc", operation_id=op.operation_id, staff_id="staff", request_id="missing")
     assert not result.can_proceed
+    assert result.blocking_reason == "empty_notification_message"
+    from app.api.routes.admin import validate_operation
+    response = await validate_operation(operation_id=op.operation_id,
+        staff=SimpleNamespace(service_id="svc", staff_id="staff"), service=w.app)
+    assert "empty_notification_message" in response.reasons
+    assert not response.can_proceed and response.confirmation_token is None
     assert not await w.repo.get_outbox_records("svc", op.operation_id)
     await w.app.update_operation(service_id="svc", operation_id=op.operation_id, staff_id="staff",
         greeting="本文1,200円/時間", introduction="\u2063", note="\u2063")
